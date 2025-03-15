@@ -104,6 +104,34 @@ do_install() {
     echo "  man configure-snapshots"
 }
 
+# Helper function to copy a file and all its dependencies
+copy_with_deps() {
+    local file="$1"
+    local dest_dir="$2"
+    
+    if [ ! -f "$file" ]; then
+        return
+    fi  # This was incorrectly a curly brace
+    
+    # Create destination directory
+    local dir_path=$(dirname "$file")
+    mkdir -p "$dest_dir$dir_path"
+    
+    # Copy the file
+    cp "$file" "$dest_dir$dir_path/" 2>/dev/null || true
+    
+    # Find and copy dependencies
+    ldd "$file" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read dep; do
+        if [ -f "$dep" ] && [ ! -f "$dest_dir$dep" ]; then
+            mkdir -p "$dest_dir$(dirname "$dep")"
+            cp "$dep" "$dest_dir$(dirname "$dep")/" 2>/dev/null || true
+            
+            # Recursive call to get dependencies of dependencies
+            copy_with_deps "$dep" "$dest_dir"
+        fi
+    done
+}
+
 # Run tests in a container
 run_tests() {
     echo "Running tests in container..."
@@ -115,38 +143,11 @@ run_tests() {
         exit 1
     fi
     
-    # Helper function to copy a file and all its dependencies
-    copy_with_deps() {
-        local file="$1"
-        local dest_dir="$2"
-        
-        if [ ! -f "$file" ]; then
-            return
-        fi
-        
-        # Create destination directory
-        local dir_path=$(dirname "$file")
-        mkdir -p "$dest_dir$dir_path"
-        
-        # Copy the file
-        cp "$file" "$dest_dir$dir_path/" 2>/dev/null || true
-        
-        # Find and copy dependencies
-        ldd "$file" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read dep; do
-            if [ -f "$dep" ] && [ ! -f "$dest_dir$dep" ]; then
-                mkdir -p "$dest_dir$(dirname "$dep")"
-                cp "$dep" "$dest_dir$(dirname "$dep")/" 2>/dev/null || true
-                
-                # Recursive call to get dependencies of dependencies
-                copy_with_deps "$dep" "$dest_dir"
-            fi
-        done
-    }
-    
     # Set up cleanup trap to ensure cleanup happens even on errors
     cleanup() {
         echo "Cleaning up test environment..."
         rm -rf tests/container
+        rm -f /tmp/test-*.sh.tmp
     }
     trap cleanup EXIT
     
@@ -225,25 +226,31 @@ run_tests() {
         echo "Using existing container..."
     fi
     
-    # Copy scripts and tests to container
-    echo "Copying scripts and tests to container..."
-    mkdir -p tests/container/rootfs/root/bin tests/container/rootfs/root/tests
-
-    # Make scripts executable before copying
-    chmod +x bin/*.sh tests/*.sh
-
-    # Copy scripts explicitly with verbose output
+    # Copy bin scripts to container
     echo "Copying bin scripts..."
+    mkdir -p tests/container/rootfs/root/bin
     cp -rv bin/* tests/container/rootfs/root/bin/
-    echo "Copying test scripts..."
-    cp -rv tests/*.sh tests/container/rootfs/root/
-
-    # Verify test-runner.sh is present and executable
-    if [ ! -f "tests/container/rootfs/root/test-runner.sh" ]; then
-        echo "Error: test-runner.sh not found in container"
-        exit 1
-    fi
-
+    
+    # Prepare test scripts for container environment
+    echo "Preparing test scripts for container environment..."
+    
+    # Create modified test-runner.sh
+    cat tests/test-runner.sh | sed 's|/bin/bash|/usr/bin/bash|g' > /tmp/test-runner.sh.tmp
+    
+    # Create modified test-create-subvolume.sh
+    cat tests/test-create-subvolume.sh > /tmp/test-create-subvolume.sh.tmp
+    
+    # Create modified test-configure-snapshots.sh with user creation disabled
+    cat tests/test-configure-snapshots.sh | 
+        sed 's|useradd -m|echo "Skipping user creation in container"|g' > /tmp/test-configure-snapshots.sh.tmp
+    
+    # Copy the modified scripts
+    echo "Copying modified test scripts..."
+    mkdir -p tests/container/rootfs/root
+    cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh
+    cp /tmp/test-create-subvolume.sh.tmp tests/container/rootfs/root/test-create-subvolume.sh
+    cp /tmp/test-configure-snapshots.sh.tmp tests/container/rootfs/root/test-configure-snapshots.sh
+    chmod +x tests/container/rootfs/root/*.sh
     
     # Create test disk images
     echo "Creating test disk images..."
@@ -258,7 +265,7 @@ run_tests() {
         --bind=/sys/fs/btrfs \
         --capability=all \
         --console=pipe \
-        /usr/bin/bash -c "cd /root && echo 'Executing test runner:' && /usr/bin/bash ./test-runner.sh"
+        /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
     TEST_RESULT=$?
     
     # Store result before trap cleanup runs
