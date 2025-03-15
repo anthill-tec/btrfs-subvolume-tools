@@ -42,7 +42,11 @@ doc/configure-snapshots.8.gz: doc/configure-snapshots.8
 	gzip -f doc/configure-snapshots.8
 
 test:
-	@echo "Running tests with systemd-nspawn..."
+	@echo "Running tests (requires root privileges)..."
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "Please run: sudo make test"; \
+		exit 1; \
+	fi
 	@./install.sh --test
 
 test-clean:

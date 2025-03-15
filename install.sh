@@ -106,15 +106,17 @@ do_install() {
 
 # Run tests in a container
 run_tests() {
-    echo "Running tests using systemd-nspawn..."
+    echo "Running tests using machinectl..."
     
-    # Check if systemd-nspawn is available
-    if ! command -v systemd-nspawn >/dev/null 2>&1; then
-        echo "Error: systemd-nspawn is not available. Cannot run tests."
+    # Check if we have root privileges
+    if [ "$EUID" -ne 0 ]; then
+        echo "Error: Tests must be run with root privileges"
+        echo "Please run: sudo $0 --test"
         exit 1
     fi
     
     # Create test container
+    CONTAINER_NAME="btrfs-test-container"
     mkdir -p tests/container/rootfs
     
     if [ ! -d tests/container/rootfs/bin ]; then
@@ -132,14 +134,37 @@ run_tests() {
             echo "Installing required packages in container..."
             systemd-nspawn -D tests/container/rootfs --pipe /bin/bash -c "pacman -Sy --noconfirm btrfs-progs snapper"
         elif [ -f /etc/arch-release ] && command -v pacman >/dev/null 2>&1; then
-            echo "Using pacman to create container..."
-            mkdir -p tests/container/rootfs/{bin,lib,usr}
-            pacman -Ql filesystem | grep -o '/[^ ]*' | xargs -I{} cp --parents -a {} tests/container/rootfs/ 2>/dev/null || true
-            pacman -Ql bash | grep -o '/[^ ]*' | xargs -I{} cp --parents -a {} tests/container/rootfs/ 2>/dev/null || true
-            pacman -Ql btrfs-progs | grep -o '/[^ ]*' | xargs -I{} cp --parents -a {} tests/container/rootfs/ 2>/dev/null || true
-            pacman -Ql snapper | grep -o '/[^ ]*' | xargs -I{} cp --parents -a {} tests/container/rootfs/ 2>/dev/null || true
+            echo "Creating minimal container environment..."
+            
+            # Create basic directory structure
+            mkdir -p tests/container/rootfs/{bin,sbin,lib,lib64,usr/{bin,sbin,lib},etc,var,dev,sys,proc,run,tmp}
+            chmod 1777 tests/container/rootfs/tmp
+            
+            # Copy only the essential binaries and their dependencies
+            for cmd in bash sh ls mount umount mkdir cp rm btrfs mkfs.btrfs snapper findmnt grep sed awk; do
+                # Find the binary
+                bin_path=$(which $cmd 2>/dev/null)
+                if [ -n "$bin_path" ]; then
+                    cp "$bin_path" tests/container/rootfs$(dirname "$bin_path")/ 2>/dev/null || true
+                    
+                    # Copy dependencies
+                    ldd "$bin_path" 2>/dev/null | grep -o '/[^ ]*' | while read lib; do
+                        if [ -f "$lib" ]; then
+                            cp "$lib" tests/container/rootfs$(dirname "$lib")/ 2>/dev/null || true
+                        fi
+                    done
+                fi
+            done
+            
+            # Create essential files
+            echo "root:x:0:0:root:/root:/bin/bash" > tests/container/rootfs/etc/passwd
+            echo "root:x:0:" > tests/container/rootfs/etc/group
+            mkdir -p tests/container/rootfs/root
+            
+            # Create minimal snapper config directory
+            mkdir -p tests/container/rootfs/etc/snapper/configs
         else
-            echo "Error: Could not create container. Please install Docker or pacman."
+            echo "Error: Could not create container. Please install Docker or use Arch Linux."
             exit 1
         fi
     else
@@ -147,10 +172,9 @@ run_tests() {
     fi
     
     # Copy scripts and tests to container
-	echo "Copying scripts and tests to container..."
-	cp -r bin tests/container/rootfs/root/bin/
-	cp -r tests/test-*.sh tests/container/rootfs/root/
-	cp tests/test-runner.sh tests/container/rootfs/root/
+    echo "Copying scripts and tests to container..."
+    cp -r bin tests/container/rootfs/root/bin/
+    cp -r tests/*.sh tests/container/rootfs/root/
     
     # Create test disk images
     echo "Creating test disk images..."
@@ -158,16 +182,35 @@ run_tests() {
     dd if=/dev/zero of=tests/container/rootfs/root/images/target-disk.img bs=1M count=500 status=none
     dd if=/dev/zero of=tests/container/rootfs/root/images/backup-disk.img bs=1M count=300 status=none
     
-   # Run tests in container
-   echo "Running tests..."
-   systemd-nspawn --directory=tests/container/rootfs \
-       --capability=all \
-       --bind=/dev \
-       --bind=/sys/fs/btrfs \
-       /bin/bash -c "cd /root && ./test-runner.sh"
+    # Clean up any existing containers with the same name
+    echo "Cleaning up any existing containers..."
+    machinectl terminate $CONTAINER_NAME >/dev/null 2>&1 || true
+    machinectl remove $CONTAINER_NAME >/dev/null 2>&1 || true
     
+    # Start the container
+    echo "Starting container..."
+    systemd-nspawn --directory=tests/container/rootfs \
+        --machine=$CONTAINER_NAME \
+        --bind=/dev \
+        --bind=/sys/fs/btrfs \
+        --capability=all \
+        -d
+    
+    # Wait for the container to be ready
+    echo "Waiting for container to start..."
+    sleep 2  # Simple wait to ensure container is running
+    
+    # Run tests in container
+    echo "Running tests..."
+    machinectl shell $CONTAINER_NAME /bin/bash -c "cd /root && ./test-runner.sh"
     TEST_RESULT=$?
     
+    # Stop and remove the container
+    echo "Stopping container..."
+    machinectl poweroff $CONTAINER_NAME --force
+    machinectl remove $CONTAINER_NAME >/dev/null 2>&1 || true
+    
+    # Cleanup
     echo "Cleaning up test environment..."
     rm -rf tests/container
     
