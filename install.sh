@@ -115,13 +115,41 @@ run_tests() {
         exit 1
     fi
     
+    # Helper function to copy a file and all its dependencies
+    copy_with_deps() {
+        local file="$1"
+        local dest_dir="$2"
+        
+        if [ ! -f "$file" ]; then
+            return
+        fi
+        
+        # Create destination directory
+        local dir_path=$(dirname "$file")
+        mkdir -p "$dest_dir$dir_path"
+        
+        # Copy the file
+        cp "$file" "$dest_dir$dir_path/" 2>/dev/null || true
+        
+        # Find and copy dependencies
+        ldd "$file" 2>/dev/null | grep "=> /" | awk '{print $3}' | while read dep; do
+            if [ -f "$dep" ] && [ ! -f "$dest_dir$dep" ]; then
+                mkdir -p "$dest_dir$(dirname "$dep")"
+                cp "$dep" "$dest_dir$(dirname "$dep")/" 2>/dev/null || true
+                
+                # Recursive call to get dependencies of dependencies
+                copy_with_deps "$dep" "$dest_dir"
+            fi
+        done
+    }
+    
     # Set up cleanup trap to ensure cleanup happens even on errors
     cleanup() {
         echo "Cleaning up test environment..."
         rm -rf tests/container
     }
     trap cleanup EXIT
-
+    
     # Create test container
     mkdir -p tests/container/rootfs
     
@@ -153,53 +181,32 @@ run_tests() {
             mknod -m 666 tests/container/rootfs/dev/zero c 1 5
             mknod -m 666 tests/container/rootfs/dev/random c 1 8
             mknod -m 666 tests/container/rootfs/dev/urandom c 1 9
-            # Don't create /dev/console to avoid conflicts
             
-            # Explicitly copy bash and its dependencies
-            echo "Copying bash and essential binaries..."
-            BASH_PATH=$(which bash)
-            if [ -n "$BASH_PATH" ]; then
-                mkdir -p tests/container/rootfs$(dirname "$BASH_PATH")
-                cp "$BASH_PATH" tests/container/rootfs$(dirname "$BASH_PATH")/
-                
-                # Always create /bin/bash for compatibility
-                mkdir -p tests/container/rootfs/bin
-                if [ ! -f "tests/container/rootfs/bin/bash" ]; then
-                    if [ -f "tests/container/rootfs$BASH_PATH" ]; then
-                        ln -sf "$BASH_PATH" tests/container/rootfs/bin/bash
-                    else
-                        cp "$BASH_PATH" tests/container/rootfs/bin/
-                    fi
-                fi
-                
-                # Copy bash dependencies
-                echo "Copying bash dependencies..."
-                ldd "$BASH_PATH" 2>/dev/null | grep -o '/[^ ]*' | while read lib; do
-                    if [ -f "$lib" ]; then
-                        mkdir -p tests/container/rootfs$(dirname "$lib")
-                        cp "$lib" tests/container/rootfs$(dirname "$lib")/ 2>/dev/null || true
+            # Copy required executables and libraries
+            echo "Copying required executables and libraries..."
+            for pkg in coreutils bash util-linux btrfs-progs snapper; do
+                echo "Processing $pkg package..."
+                pacman -Ql $pkg 2>/dev/null | grep -v '/$' | grep -E '/(s?bin|lib)/' | awk '{print $2}' | while read file; do
+                    if [ -f "$file" ] && [ -x "$file" ]; then
+                        copy_with_deps "$file" "tests/container/rootfs"
                     fi
                 done
-            else
-                echo "Error: bash not found"
-                exit 1
-            fi
-
-            # Copy other essential binaries and their dependencies
-            for cmd in sh ls mount umount mkdir cp rm btrfs mkfs.btrfs snapper findmnt grep sed awk chmod; do
-                # Find the binary
-                bin_path=$(which $cmd 2>/dev/null)
-                if [ -n "$bin_path" ]; then
-                    mkdir -p tests/container/rootfs$(dirname "$bin_path")
-                    cp "$bin_path" tests/container/rootfs$(dirname "$bin_path")/ 2>/dev/null || true
-        
-                    # Copy dependencies
-                    ldd "$bin_path" 2>/dev/null | grep -o '/[^ ]*' | while read lib; do
-                        if [ -f "$lib" ]; then
-                            mkdir -p tests/container/rootfs$(dirname "$lib")
-                            cp "$lib" tests/container/rootfs$(dirname "$lib")/ 2>/dev/null || true
-                        fi
-                    done
+            done
+            
+            # Copy critical libraries that might not be picked up
+            echo "Copying additional critical libraries..."
+            for lib in $(ldconfig -p | grep -E 'libreadline|libncurses|libtinfo' | awk '{print $4}'); do
+                if [ -f "$lib" ]; then
+                    copy_with_deps "$lib" "tests/container/rootfs"
+                fi
+            done
+            
+            # Also copy ld-linux (dynamic linker)
+            for lib in /lib/ld-linux*.so* /lib64/ld-linux*.so* /usr/lib/ld-linux*.so*; do
+                if [ -f "$lib" ]; then
+                    dir=$(dirname "$lib")
+                    mkdir -p "tests/container/rootfs$dir"
+                    cp "$lib" "tests/container/rootfs$dir/" 2>/dev/null || true
                 fi
             done
             
@@ -221,8 +228,22 @@ run_tests() {
     # Copy scripts and tests to container
     echo "Copying scripts and tests to container..."
     mkdir -p tests/container/rootfs/root/bin tests/container/rootfs/root/tests
-    cp -r bin/* tests/container/rootfs/root/bin/
-    cp tests/*.sh tests/container/rootfs/root/
+
+    # Make scripts executable before copying
+    chmod +x bin/*.sh tests/*.sh
+
+    # Copy scripts explicitly with verbose output
+    echo "Copying bin scripts..."
+    cp -rv bin/* tests/container/rootfs/root/bin/
+    echo "Copying test scripts..."
+    cp -rv tests/*.sh tests/container/rootfs/root/
+
+    # Verify test-runner.sh is present and executable
+    if [ ! -f "tests/container/rootfs/root/test-runner.sh" ]; then
+        echo "Error: test-runner.sh not found in container"
+        exit 1
+    fi
+
     
     # Create test disk images
     echo "Creating test disk images..."
@@ -230,27 +251,27 @@ run_tests() {
     dd if=/dev/zero of=tests/container/rootfs/root/images/target-disk.img bs=1M count=500 status=none
     dd if=/dev/zero of=tests/container/rootfs/root/images/backup-disk.img bs=1M count=300 status=none
     
-    # Run tests directly in the container with special options to avoid console issues
+    # Run tests directly in the container with special options
     echo "Running tests..."
     systemd-nspawn --directory=tests/container/rootfs \
         --bind=/dev \
         --bind=/sys/fs/btrfs \
         --capability=all \
         --console=pipe \
-        /bin/bash -c "cd /root && chmod +x ./*.sh && ./test-runner.sh"
+        /usr/bin/bash -c "cd /root && echo 'Executing test runner:' && /usr/bin/bash ./test-runner.sh"
     TEST_RESULT=$?
     
-    # Cleanup
-    echo "Cleaning up test environment..."
-    rm -rf tests/container
-    
+    # Store result before trap cleanup runs
     if [ $TEST_RESULT -eq 0 ]; then
         echo "All tests passed!"
-        return 0
+        FINAL_RESULT=0
     else
         echo "Some tests failed."
-        return $TEST_RESULT
+        FINAL_RESULT=1
     fi
+    
+    # Cleanup happens automatically via trap
+    return $FINAL_RESULT
 }
 
 # Main function

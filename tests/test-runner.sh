@@ -18,6 +18,16 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+# Find bash executable
+if [ -f "/usr/bin/bash" ]; then
+    BASH_EXEC="/usr/bin/bash"
+elif [ -f "/bin/bash" ]; then
+    BASH_EXEC="/bin/bash"
+else
+    echo "Error: Could not find bash executable"
+    exit 1
+fi
+
 # Print header
 echo -e "${BLUE}============================================${NC}"
 echo -e "${BLUE}      BTRFS Subvolume Tools Test Suite      ${NC}"
@@ -47,7 +57,7 @@ FAILED=0
 # Test create-subvolume
 TOTAL=$((TOTAL+1))
 echo -e "${BLUE}Test 1: create-subvolume${NC}"
-if "$TEST_DIR/test-create-subvolume.sh"; then
+if "$BASH_EXEC" "$TEST_DIR/test-create-subvolume.sh"; then
     PASSED=$((PASSED+1))
 else
     FAILED=$((FAILED+1))
@@ -57,7 +67,7 @@ echo ""
 # Test configure-snapshots
 TOTAL=$((TOTAL+1))
 echo -e "${BLUE}Test 2: configure-snapshots${NC}"
-if "$TEST_DIR/test-configure-snapshots.sh"; then
+if "$BASH_EXEC" "$TEST_DIR/test-configure-snapshots.sh"; then
     PASSED=$((PASSED+1))
 else
     FAILED=$((FAILED+1))
