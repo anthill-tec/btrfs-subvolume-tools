@@ -46,9 +46,24 @@ echo -e "${YELLOW}Setting up test environment...${NC}"
 echo -e "Creating test directory structure..."
 mkdir -p "$TARGET_MOUNT" "$BACKUP_MOUNT"
 
-echo -e "Creating disk images..."
-TARGET_IMAGE="/root/images/target-disk.img"
-BACKUP_IMAGE="/root/images/backup-disk.img"
+echo -e "Finding disk images..."
+# Use find to locate the images instead of hardcoding paths
+TARGET_IMAGE=$(find / -name "target-disk.img" 2>/dev/null | head -n 1)
+BACKUP_IMAGE=$(find / -name "backup-disk.img" 2>/dev/null | head -n 1)
+
+# Verify that we found the images
+if [ -z "$TARGET_IMAGE" ]; then
+    echo -e "${RED}Error: Could not locate target-disk.img${NC}"
+    exit 1
+fi
+
+if [ -z "$BACKUP_IMAGE" ]; then
+    echo -e "${RED}Error: Could not locate backup-disk.img${NC}"
+    exit 1
+fi
+
+echo -e "Found target image: $TARGET_IMAGE"
+echo -e "Found backup image: $BACKUP_IMAGE"
 
 echo -e "Setting up loop devices..."
 # Check if we're in a container environment

@@ -64,15 +64,17 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Create test user if needed
-if ! id "$ALLOW_USERS" &>/dev/null; then
-    echo -e "${YELLOW}Creating test user $ALLOW_USERS...${NC}"
-    # Check if we're in a container environment
-    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-        echo "Skipping user creation in container"
-    else
+if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
+    # Skip user creation in container environments
+    echo "Skipping user creation in container environment"
+    ALLOW_USERS="root"  # Use root instead of a test user in container
+else
+    # Regular user creation for non-container environments
+    if ! id "$ALLOW_USERS" &>/dev/null; then
+        echo -e "${YELLOW}Creating test user $ALLOW_USERS...${NC}"
         useradd -m -s /bin/bash "$ALLOW_USERS"
+        TEST_USER_ADDED=1
     fi
-    TEST_USER_ADDED=1
 fi
 
 # Setup test environment
@@ -81,8 +83,17 @@ echo -e "${YELLOW}Setting up test environment...${NC}"
 echo -e "Creating test directory structure..."
 mkdir -p "$TARGET_MOUNT"
 
-echo -e "Creating disk image..."
-TARGET_IMAGE="/root/images/target-disk.img"
+echo -e "Finding disk image..."
+# Use find to locate the image instead of hardcoding path
+TARGET_IMAGE=$(find / -name "target-disk.img" 2>/dev/null | head -n 1)
+
+# Verify that we found the image
+if [ -z "$TARGET_IMAGE" ]; then
+    echo -e "${RED}Error: Could not locate target-disk.img${NC}"
+    exit 1
+fi
+
+echo -e "Found target image: $TARGET_IMAGE"
 
 echo -e "Setting up loop device..."
 # Check if we're in a container environment

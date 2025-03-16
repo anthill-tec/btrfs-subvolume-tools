@@ -240,23 +240,23 @@ run_tests() {
     echo "Copying modified test scripts..."
     mkdir -p tests/container/rootfs/root
     cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh
-    
-    
+        
     cp ./tests/test-create-subvolume.sh tests/container/rootfs/root/test-create-subvolume.sh
     cp ./tests/test-configure-snapshots.sh tests/container/rootfs/root/test-configure-snapshots.sh
     chmod +x tests/container/rootfs/root/*.sh
     
     # Create test disk images
     echo "Creating test disk images..."
-    mkdir -p tests/container/rootfs/root/images
-    dd if=/dev/zero of=tests/container/rootfs/root/images/target-disk.img bs=1M count=500 status=none
-    dd if=/dev/zero of=tests/container/rootfs/root/images/backup-disk.img bs=1M count=300 status=none
+    mkdir -p tests/container/rootfs/images    # Remove the /root prefix
+    dd if=/dev/zero of=tests/container/rootfs/images/target-disk.img bs=1M count=500 status=none
+    dd if=/dev/zero of=tests/container/rootfs/images/backup-disk.img bs=1M count=300 status=none
 
-    # Run tests directly in the container with enhanced device access
+    # Set up loop devices in container
     echo "Setting up loop devices in container..."
     mkdir -p tests/container/rootfs/dev
-    mkdir -p tests/container/rootfs/dev/loop-control
-    touch tests/container/rootfs/dev/loop8 tests/container/rootfs/dev/loop9 tests/container/rootfs/dev/loop10
+    mknod -m 660 tests/container/rootfs/dev/loop8 b 7 8 2>/dev/null || true
+    mknod -m 660 tests/container/rootfs/dev/loop9 b 7 9 2>/dev/null || true
+    mknod -m 660 tests/container/rootfs/dev/loop10 b 7 10 2>/dev/null || true
 
     # Run with appropriate device permissions
     systemd-nspawn --directory=tests/container/rootfs \
@@ -267,9 +267,9 @@ run_tests() {
         --property="DeviceAllow=/dev/loop* rw" \
         --bind-ro=/bin/mknod:/bin/mknod \
         --bind-ro=/bin/losetup:/bin/losetup \
-        --bind-ro=/usr/sbin/useradd:/usr/sbin/useradd \
+        --bind-ro=/usr/bin/find:/usr/bin/find \ 
         --console=pipe \
-            /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
+            /usr/bin/bash -c "cd / && exec /usr/bin/bash /root/test-runner.sh"
     
     TEST_RESULT=$?
     
