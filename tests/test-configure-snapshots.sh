@@ -66,12 +66,7 @@ fi
 # Create test user if needed
 if ! id "$ALLOW_USERS" &>/dev/null; then
     echo -e "${YELLOW}Creating test user $ALLOW_USERS...${NC}"
-    # Check if we're in a container environment
-    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-        echo "Skipping user creation in container"
-    else
-        useradd -m -s /bin/bash "$ALLOW_USERS"
-    fi
+    useradd -m -s /bin/bash "$ALLOW_USERS"
     TEST_USER_ADDED=1
 fi
 
@@ -85,17 +80,7 @@ echo -e "Creating disk image..."
 TARGET_IMAGE="/root/images/target-disk.img"
 
 echo -e "Setting up loop device..."
-# Check if we're in a container environment
-if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-    # Container-specific setup with explicit loop device
-    echo -e "Using container-specific loop device setup"
-    mknod -m 660 /dev/loop10 b 7 10 2>/dev/null || true
-    losetup /dev/loop10 "$TARGET_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
-    TARGET_DEVICE="/dev/loop10"
-else
-    # Standard setup for non-container environments
-    TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
-fi
+TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
 echo -e "  Target device: $TARGET_DEVICE"
 
 echo -e "Formatting device with btrfs..."
@@ -197,12 +182,7 @@ systemctl disable --now snapper-cleanup.timer &>/dev/null || true
 
 # Unmount and remove test filesystem
 umount "$TARGET_MOUNT" || true
-# Check if we're in a container environment
-if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-    losetup -d /dev/loop10 || true
-else
-    losetup -d "$TARGET_DEVICE" || true
-fi
+losetup -d "$TARGET_DEVICE" || true
 rm -rf "$TEST_DIR"
 
 # Remove test user if we created one

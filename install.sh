@@ -183,9 +183,9 @@ run_tests() {
             mknod -m 666 tests/container/rootfs/dev/random c 1 8
             mknod -m 666 tests/container/rootfs/dev/urandom c 1 9
             
-            # Ensure essential utilities are available
-            echo "Ensuring required utilities are available in container..."
-            for pkg in coreutils bash util-linux btrfs-progs snapper e2fsprogs mknod losetup; do
+            # Copy required executables and libraries
+            echo "Copying required executables and libraries..."
+            for pkg in coreutils bash util-linux btrfs-progs snapper; do
                 echo "Processing $pkg package..."
                 pacman -Ql $pkg 2>/dev/null | grep -v '/$' | grep -E '/(s?bin|lib)/' | awk '{print $2}' | while read file; do
                     if [ -f "$file" ] && [ -x "$file" ]; then
@@ -193,18 +193,6 @@ run_tests() {
                     fi
                 done
             done
-
-            # Ensure important binaries are available
-            for binary in mknod losetup useradd userdel mount umount mkfs.btrfs btrfs; do
-                binary_path=$(which $binary 2>/dev/null)
-                if [ -n "$binary_path" ]; then
-                    echo "Copying essential binary: $binary"
-                    copy_with_deps "$binary_path" "tests/container/rootfs"
-                else
-                    echo "Warning: $binary not found on host system"
-                fi
-            done
-            
             # Copy critical libraries that might not be picked up
             echo "Copying additional critical libraries..."
             for lib in $(ldconfig -p | grep -E 'libreadline|libncurses|libtinfo' | awk '{print $4}'); do
@@ -248,15 +236,28 @@ run_tests() {
     # Create modified test-runner.sh
     cat tests/test-runner.sh | sed 's|/bin/bash|/usr/bin/bash|g' > /tmp/test-runner.sh.tmp
 
+    # Create modified test-create-subvolume.sh with explicit loop device setup
+    cat tests/test-create-subvolume.sh | 
+        sed 's|TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")|mknod -m 660 /dev/loop8 b 7 8 2>/dev/null || true; losetup /dev/loop8 "$TARGET_IMAGE" || { echo "Failed to set up loop device"; exit 1; }; TARGET_DEVICE="/dev/loop8"|g' |
+        sed 's|BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")|mknod -m 660 /dev/loop9 b 7 9 2>/dev/null || true; losetup /dev/loop9 "$BACKUP_IMAGE" || { echo "Failed to set up loop device"; exit 1; }; BACKUP_DEVICE="/dev/loop9"|g' |
+        sed 's|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|g' |
+        sed 's|mount "$BACKUP_DEVICE" "$BACKUP_MOUNT"|mount "$BACKUP_DEVICE" "$BACKUP_MOUNT"|g' |
+        sed 's|losetup -d "$TARGET_DEVICE"|losetup -d /dev/loop8|g' |
+        sed 's|losetup -d "$BACKUP_DEVICE"|losetup -d /dev/loop9|g' > /tmp/test-create-subvolume.sh.tmp
+
+    # Create modified test-configure-snapshots.sh with explicit loop device setup
+    cat tests/test-configure-snapshots.sh | 
+        sed 's|useradd -m|echo "Skipping user creation in container"|g' |
+        sed 's|TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")|mknod -m 660 /dev/loop10 b 7 10 2>/dev/null || true; losetup /dev/loop10 "$TARGET_IMAGE" || { echo "Failed to set up loop device"; exit 1; }; TARGET_DEVICE="/dev/loop10"|g' |
+        sed 's|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|g' |
+        sed 's|losetup -d "$TARGET_DEVICE"|losetup -d /dev/loop10|g' > /tmp/test-configure-snapshots.sh.tmp
 
     # Copy the modified scripts
     echo "Copying modified test scripts..."
     mkdir -p tests/container/rootfs/root
     cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh
-    
-    # Copy test cases
-    cp ./tests/test-create-subvolume.sh tests/container/rootfs/root/test-create-subvolume.sh
-    cp ./tests/test-configure-snapshots.sh tests/container/rootfs/root/test-configure-snapshots.sh
+    cp /tmp/test-create-subvolume.sh.tmp tests/container/rootfs/root/test-create-subvolume.sh
+    cp /tmp/test-configure-snapshots.sh.tmp tests/container/rootfs/root/test-configure-snapshots.sh
     chmod +x tests/container/rootfs/root/*.sh
     
     # Create test disk images
