@@ -236,28 +236,14 @@ run_tests() {
     # Create modified test-runner.sh
     cat tests/test-runner.sh | sed 's|/bin/bash|/usr/bin/bash|g' > /tmp/test-runner.sh.tmp
 
-    # Create modified test-create-subvolume.sh with explicit loop device setup
-    cat tests/test-create-subvolume.sh | 
-        sed 's|TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")|mknod -m 660 /dev/loop8 b 7 8 2>/dev/null || true; losetup /dev/loop8 "$TARGET_IMAGE" || { echo "Failed to set up loop device"; exit 1; }; TARGET_DEVICE="/dev/loop8"|g' |
-        sed 's|BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")|mknod -m 660 /dev/loop9 b 7 9 2>/dev/null || true; losetup /dev/loop9 "$BACKUP_IMAGE" || { echo "Failed to set up loop device"; exit 1; }; BACKUP_DEVICE="/dev/loop9"|g' |
-        sed 's|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|g' |
-        sed 's|mount "$BACKUP_DEVICE" "$BACKUP_MOUNT"|mount "$BACKUP_DEVICE" "$BACKUP_MOUNT"|g' |
-        sed 's|losetup -d "$TARGET_DEVICE"|losetup -d /dev/loop8|g' |
-        sed 's|losetup -d "$BACKUP_DEVICE"|losetup -d /dev/loop9|g' > /tmp/test-create-subvolume.sh.tmp
-
-    # Create modified test-configure-snapshots.sh with explicit loop device setup
-    cat tests/test-configure-snapshots.sh | 
-        sed 's|useradd -m|echo "Skipping user creation in container"|g' |
-        sed 's|TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")|mknod -m 660 /dev/loop10 b 7 10 2>/dev/null || true; losetup /dev/loop10 "$TARGET_IMAGE" || { echo "Failed to set up loop device"; exit 1; }; TARGET_DEVICE="/dev/loop10"|g' |
-        sed 's|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|g' |
-        sed 's|losetup -d "$TARGET_DEVICE"|losetup -d /dev/loop10|g' > /tmp/test-configure-snapshots.sh.tmp
-
     # Copy the modified scripts
     echo "Copying modified test scripts..."
     mkdir -p tests/container/rootfs/root
     cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh
-    cp /tmp/test-create-subvolume.sh.tmp tests/container/rootfs/root/test-create-subvolume.sh
-    cp /tmp/test-configure-snapshots.sh.tmp tests/container/rootfs/root/test-configure-snapshots.sh
+    
+    
+    cp ./tests/test-create-subvolume.sh tests/container/rootfs/root/test-create-subvolume.sh
+    cp ./tests/test-configure-snapshots.sh tests/container/rootfs/root/test-configure-snapshots.sh
     chmod +x tests/container/rootfs/root/*.sh
     
     # Create test disk images
@@ -272,15 +258,18 @@ run_tests() {
     mkdir -p tests/container/rootfs/dev/loop-control
     touch tests/container/rootfs/dev/loop8 tests/container/rootfs/dev/loop9 tests/container/rootfs/dev/loop10
 
-# Run with appropriate device permissions
-systemd-nspawn --directory=tests/container/rootfs \
-    --bind=/dev \
-    --bind=/sys/fs/btrfs \
-    --capability=all \
-    --property="DeviceAllow=block-loop rw" \
-    --property="DeviceAllow=/dev/loop* rw" \
-    --console=pipe \
-        /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
+    # Run with appropriate device permissions
+    systemd-nspawn --directory=tests/container/rootfs \
+        --bind=/dev \
+        --bind=/sys/fs/btrfs \
+        --capability=all \
+        --property="DeviceAllow=block-loop rw" \
+        --property="DeviceAllow=/dev/loop* rw" \
+        --bind-ro=/bin/mknod:/bin/mknod \
+        --bind-ro=/bin/losetup:/bin/losetup \
+        --bind-ro=/usr/sbin/useradd:/usr/sbin/useradd \
+        --console=pipe \
+            /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
     
     TEST_RESULT=$?
     
