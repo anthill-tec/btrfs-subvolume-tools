@@ -193,7 +193,6 @@ run_tests() {
                     fi
                 done
             done
-            
             # Copy critical libraries that might not be picked up
             echo "Copying additional critical libraries..."
             for lib in $(ldconfig -p | grep -E 'libreadline|libncurses|libtinfo' | awk '{print $4}'); do
@@ -233,17 +232,26 @@ run_tests() {
     
     # Prepare test scripts for container environment
     echo "Preparing test scripts for container environment..."
-    
+
     # Create modified test-runner.sh
     cat tests/test-runner.sh | sed 's|/bin/bash|/usr/bin/bash|g' > /tmp/test-runner.sh.tmp
-    
-    # Create modified test-create-subvolume.sh
-    cat tests/test-create-subvolume.sh > /tmp/test-create-subvolume.sh.tmp
-    
-    # Create modified test-configure-snapshots.sh with user creation disabled
+
+    # Create modified test-create-subvolume.sh with correct image paths
+    cat tests/test-create-subvolume.sh | 
+        sed 's|TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")|echo "Using direct loop mounting instead of losetup"; TARGET_DEVICE="$TARGET_IMAGE"|g' |
+        sed 's|BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")|BACKUP_DEVICE="$BACKUP_IMAGE"|g' |
+        sed 's|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|mount -o loop "$TARGET_DEVICE" "$TARGET_MOUNT"|g' |
+        sed 's|mount "$BACKUP_DEVICE" "$BACKUP_MOUNT"|mount -o loop "$BACKUP_DEVICE" "$BACKUP_MOUNT"|g' |
+        sed 's|losetup -d "$TARGET_DEVICE"|# Skipping losetup -d|g' |
+        sed 's|losetup -d "$BACKUP_DEVICE"|# Skipping losetup -d|g' > /tmp/test-create-subvolume.sh.tmp
+
+    # Create modified test-configure-snapshots.sh with user creation disabled and correct paths
     cat tests/test-configure-snapshots.sh | 
-        sed 's|useradd -m|echo "Skipping user creation in container"|g' > /tmp/test-configure-snapshots.sh.tmp
-    
+        sed 's|useradd -m|echo "Skipping user creation in container"|g' |
+        sed 's|TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")|echo "Using direct loop mounting instead of losetup"; TARGET_DEVICE="$TARGET_IMAGE"|g' |
+        sed 's|mount "$TARGET_DEVICE" "$TARGET_MOUNT"|mount -o loop "$TARGET_DEVICE" "$TARGET_MOUNT"|g' |
+        sed 's|losetup -d "$TARGET_DEVICE"|# Skipping losetup -d|g' > /tmp/test-configure-snapshots.sh.tmp
+
     # Copy the modified scripts
     echo "Copying modified test scripts..."
     mkdir -p tests/container/rootfs/root
@@ -257,15 +265,15 @@ run_tests() {
     mkdir -p tests/container/rootfs/root/images
     dd if=/dev/zero of=tests/container/rootfs/root/images/target-disk.img bs=1M count=500 status=none
     dd if=/dev/zero of=tests/container/rootfs/root/images/backup-disk.img bs=1M count=300 status=none
-    
+
     # Run tests directly in the container with special options
-    echo "Running tests..."
     systemd-nspawn --directory=tests/container/rootfs \
         --bind=/dev \
         --bind=/sys/fs/btrfs \
         --capability=all \
         --console=pipe \
-        /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
+            /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
+    
     TEST_RESULT=$?
     
     # Store result before trap cleanup runs
