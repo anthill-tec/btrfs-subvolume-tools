@@ -7,6 +7,9 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Default project name if not provided
+PROJECT_NAME="${PROJECT_NAME:-Project}"
+
 # Test directory - updated for container environment
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TEST_DIR="$SCRIPT_DIR"  # In container, all test scripts are in the same directory
@@ -30,20 +33,24 @@ fi
 
 # Print header
 echo -e "${BLUE}============================================${NC}"
-echo -e "${BLUE}      BTRFS Subvolume Tools Test Suite      ${NC}"
+echo -e "${BLUE}      ${PROJECT_NAME} Test Suite      ${NC}"
 echo -e "${BLUE}============================================${NC}"
 echo ""
 
-# Check if test scripts exist
-if [ ! -f "$TEST_DIR/test-create-subvolume.sh" ] || [ ! -f "$TEST_DIR/test-configure-snapshots.sh" ]; then
-    echo -e "${RED}Error: Test scripts not found${NC}"
+# Find all test scripts (prefixed with test- but not including this script)
+TEST_SCRIPT_NAME=$(basename "$0")
+TEST_SCRIPTS=$(find "$TEST_DIR" -name "test-*.sh" ! -name "$TEST_SCRIPT_NAME" | sort)
+
+if [ -z "$TEST_SCRIPTS" ]; then
+    echo -e "${RED}Error: No test scripts found${NC}"
     echo -e "${YELLOW}Expected location: $TEST_DIR/test-*.sh${NC}"
     exit 1
 fi
 
 # Make test scripts executable
-chmod +x "$TEST_DIR/test-create-subvolume.sh"
-chmod +x "$TEST_DIR/test-configure-snapshots.sh"
+for script in $TEST_SCRIPTS; do
+    chmod +x "$script"
+done
 
 # Run tests
 echo -e "${YELLOW}Running test suite...${NC}"
@@ -54,25 +61,19 @@ TOTAL=0
 PASSED=0
 FAILED=0
 
-# Test create-subvolume
-TOTAL=$((TOTAL+1))
-echo -e "${BLUE}Test 1: create-subvolume${NC}"
-if "$BASH_EXEC" "$TEST_DIR/test-create-subvolume.sh"; then
-    PASSED=$((PASSED+1))
-else
-    FAILED=$((FAILED+1))
-fi
-echo ""
-
-# Test configure-snapshots
-TOTAL=$((TOTAL+1))
-echo -e "${BLUE}Test 2: configure-snapshots${NC}"
-if "$BASH_EXEC" "$TEST_DIR/test-configure-snapshots.sh"; then
-    PASSED=$((PASSED+1))
-else
-    FAILED=$((FAILED+1))
-fi
-echo ""
+# Run all test scripts
+for script in $TEST_SCRIPTS; do
+    TOTAL=$((TOTAL+1))
+    TEST_NAME=$(basename "$script" .sh)
+    echo -e "${BLUE}Test $TOTAL: ${TEST_NAME#test-}${NC}"
+    
+    if "$BASH_EXEC" "$script"; then
+        PASSED=$((PASSED+1))
+    else
+        FAILED=$((FAILED+1))
+    fi
+    echo ""
+done
 
 # Print summary
 echo -e "${BLUE}============================================${NC}"

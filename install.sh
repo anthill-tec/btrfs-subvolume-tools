@@ -1,5 +1,6 @@
 #!/bin/bash
-set -e
+# Remove the set -e to prevent premature exits on command failures
+# We'll handle errors explicitly instead
 
 PREFIX="${PREFIX:-/usr/local}"
 
@@ -143,19 +144,35 @@ run_tests() {
         exit 1
     fi
     
-    # Set up cleanup trap to ensure cleanup happens even on errors
-    cleanup() {
-        echo "Cleaning up test environment..."
-        # Clean up any existing containers
+    # Clean up function declarations - to be used by traps
+    early_cleanup() {
+        echo "Performing early cleanup..."
+        # Clean up any existing containers with btrfs-test prefix
         machinectl list | grep "btrfs-test-" | awk '{print $1}' | while read machine; do
-            echo "Cleaning up container: $machine"
+            echo "Cleaning up existing container: $machine"
             machinectl terminate "$machine" 2>/dev/null || true
             machinectl remove "$machine" 2>/dev/null || true
         done
-        rm -rf tests/container
-        rm -f /tmp/test-*.sh.tmp
+        rm -rf tests/container 2>/dev/null || true
+        rm -f /tmp/test-*.sh.tmp 2>/dev/null || true
     }
-    trap cleanup EXIT
+    
+    cleanup() {
+        echo "Cleaning up test environment..."
+        # Only try to clean up the container if we have a name
+        if [ -n "$CONTAINER_NAME" ]; then
+            echo "Terminating container $CONTAINER_NAME..."
+            machinectl poweroff "$CONTAINER_NAME" 2>/dev/null || true
+            sleep 2
+            machinectl terminate "$CONTAINER_NAME" 2>/dev/null || true
+            machinectl remove "$CONTAINER_NAME" 2>/dev/null || true
+        fi
+        rm -rf tests/container 2>/dev/null || true
+        rm -f /tmp/test-*.sh.tmp 2>/dev/null || true
+    }
+    
+    # Set up early cleanup trap for script preparation phase
+    trap early_cleanup EXIT
     
     # Create test container directory
     mkdir -p tests/container/rootfs
@@ -231,15 +248,21 @@ run_tests() {
 
     # Create modified test-runner.sh
     cat tests/test-runner.sh | sed 's|/bin/bash|/usr/bin/bash|g' > /tmp/test-runner.sh.tmp
-
-    # Copy the modified scripts
-    echo "Copying modified test scripts..."
+    
+    # Copy the test-runner script
+    echo "Copying test-runner script..."
     mkdir -p tests/container/rootfs/root
     cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh
-        
-    cp ./tests/test-create-subvolume.sh tests/container/rootfs/root/test-create-subvolume.sh
-    cp ./tests/test-configure-snapshots.sh tests/container/rootfs/root/test-configure-snapshots.sh
-    chmod +x tests/container/rootfs/root/*.sh
+    chmod +x tests/container/rootfs/root/test-runner.sh
+    
+    # Find and copy all test scripts (except test-runner.sh itself)
+    echo "Copying test scripts..."
+    TEST_RUNNER_NAME=$(basename "$(find tests -name "test-runner.sh" | head -n 1)")
+    find tests -name "test-*.sh" ! -name "$TEST_RUNNER_NAME" | while read script; do
+        echo "Copying: $script"
+        cp "$script" tests/container/rootfs/root/
+        chmod +x tests/container/rootfs/root/$(basename "$script")
+    done
     
     # Create test disk images
     echo "Creating test disk images..."
@@ -249,7 +272,21 @@ run_tests() {
 
     # Generate unique container name
     CONTAINER_NAME="btrfs-test-$(date +%Y%m%d-%H%M%S)"
-    LOG_FILE="container-$(date +%Y%m%d-%H%M%S).log"
+    
+    # Set up log directory structure for this container session
+    LOG_BASE_DIR="tests/logs"
+    LOG_SESSION_DIR="$LOG_BASE_DIR/$CONTAINER_NAME"
+    mkdir -p "$LOG_SESSION_DIR"
+    
+    # Function to create numbered log files
+    log_command() {
+        local seq_num="$1"
+        local command_name="$2"
+        local command="$3"
+        
+        echo "Logging command '$command_name' (step $seq_num)..."
+        $command > "$LOG_SESSION_DIR/${seq_num}_${command_name}.log" 2>&1 || true
+    }
     
     # Clean up any existing container with similar name (safety check)
     machinectl list | grep "btrfs-test-" | awk '{print $1}' | while read machine; do
@@ -260,48 +297,158 @@ run_tests() {
     
     # Import container filesystem
     echo "Importing container filesystem as $CONTAINER_NAME..."
-    machinectl import-fs tests/container/rootfs "$CONTAINER_NAME"
+    if ! machinectl import-fs tests/container/rootfs "$CONTAINER_NAME"; then
+        echo "Error: Failed to import container filesystem"
+        log_command "01" "import_failure" "machinectl status $CONTAINER_NAME"
+        log_command "02" "machined_log" "journalctl -u systemd-machined.service -n 50"
+        log_command "03" "import_service_log" "journalctl -b -u importctl.service -n 50"
+        
+        # Clean up any partial container
+        machinectl terminate "$CONTAINER_NAME" 2>/dev/null || true
+        machinectl remove "$CONTAINER_NAME" 2>/dev/null || true
+        return 1
+    fi
+    
+    # Debugging: Verify container structure
+    echo "Verifying container structure..."
+    log_command "04" "container_dirs" "find tests/container/rootfs -type d | sort"
+    log_command "05" "container_files" "find tests/container/rootfs -type f | grep -v 'img$' | sort | head -n 100"
+    
+    # Check for critical files
+    for file in /etc/os-release /etc/machine-id; do
+        if [ ! -f "tests/container/rootfs$file" ]; then
+            echo "Warning: Critical file missing: $file"
+            log_command "06" "missing_file_${file//\//_}" "echo 'File $file is missing from container'"
+            
+            # Create basic placeholder files
+            case "$file" in
+                "/etc/os-release")
+                    mkdir -p "tests/container/rootfs/etc"
+                    echo 'NAME="Minimal Container"' > "tests/container/rootfs/etc/os-release"
+                    echo 'ID=minimal' >> "tests/container/rootfs/etc/os-release"
+                    echo 'VERSION_ID="1.0"' >> "tests/container/rootfs/etc/os-release"
+                    
+                    log_command "07" "created_os_release" "cat tests/container/rootfs/etc/os-release"
+                    ;;
+                "/etc/machine-id")
+                    mkdir -p "tests/container/rootfs/etc"
+                    if command -v uuidgen &> /dev/null; then
+                        echo "$(uuidgen | tr -d '-')" > "tests/container/rootfs/etc/machine-id"
+                    else
+                        echo "$(date +%s%N | sha256sum | head -c 32)" > "tests/container/rootfs/etc/machine-id"
+                    fi
+                    
+                    log_command "08" "created_machine_id" "cat tests/container/rootfs/etc/machine-id"
+                    ;;
+            esac
+        fi
+    done
     
     # Start the container
     echo "Starting container $CONTAINER_NAME..."
-    machinectl start "$CONTAINER_NAME"
+    if ! machinectl start "$CONTAINER_NAME"; then
+        echo "Error: Failed to start container with machinectl start"
+        
+        # Capture detailed logs about the failure
+        echo "Capturing detailed startup failure logs..."
+        log_command "09" "status_after_start_failure" "machinectl status $CONTAINER_NAME"
+        log_command "10" "machined_log_after_start" "journalctl -u systemd-machined.service -n 50"
+        log_command "11" "importctl_list" "importctl list machine" 
+        log_command "12" "journal_container_messages" "journalctl -xb --grep=\"$CONTAINER_NAME\""
+        
+        # Try alternative approach if first method failed
+        echo "Trying alternative approaches to start the container..."
+        if machinectl enable "$CONTAINER_NAME" 2>/dev/null; then
+            log_command "13" "enable_container" "echo 'Container enabled'"
+            
+            echo "Enabled container, trying to start again..."
+            if machinectl start "$CONTAINER_NAME"; then
+                log_command "14" "start_after_enable_success" "echo 'Container started successfully after enable'"
+                echo "Container started successfully with alternative approach!"
+            else
+                log_command "15" "start_after_enable_failure" "echo 'Container failed to start after enable'"
+                log_command "16" "final_status" "machinectl status $CONTAINER_NAME"
+                
+                echo "Alternative approach also failed to start container"
+                machinectl terminate "$CONTAINER_NAME" 2>/dev/null || true
+                machinectl remove "$CONTAINER_NAME" 2>/dev/null || true
+                echo "Check logs in $LOG_SESSION_DIR for details on the failure"
+                return 1
+            fi
+        else
+            log_command "13" "enable_container_failure" "echo 'Failed to enable container'"
+            log_command "14" "final_status" "machinectl status $CONTAINER_NAME"
+            
+            machinectl terminate "$CONTAINER_NAME" 2>/dev/null || true
+            machinectl remove "$CONTAINER_NAME" 2>/dev/null || true
+            echo "Check logs in $LOG_SESSION_DIR for details on the failure"
+            return 1
+        fi
+    else
+        log_command "09" "start_success" "machinectl status $CONTAINER_NAME"
+    fi
     
-    # Give container time to start up
-    sleep 3
+    # Wait for container to be fully running - disable trap during waiting
+    trap - EXIT
+    echo "Waiting for container to start..."
+    CONTAINER_READY=false
+    for i in {1..30}; do
+        log_command "15" "status_during_wait_${i}" "machinectl status $CONTAINER_NAME"
+        
+        if machinectl status "$CONTAINER_NAME" 2>/dev/null | grep -q "State: running"; then
+            log_command "16" "container_running" "echo 'Container is now running'"
+            CONTAINER_READY=true
+            break
+        fi
+        echo "Waiting... ($i/30)"
+        sleep 2
+    done
+
+    # Verify container is running
+    if [ "$CONTAINER_READY" != "true" ]; then
+        echo "Error: Container failed to start properly. Check system logs."
+        log_command "17" "container_start_timeout" "echo 'Container did not reach running state after 30 attempts'"
+        log_command "18" "final_machined_log" "journalctl -u systemd-machined.service -n 100"
+        log_command "19" "final_container_status" "machinectl status $CONTAINER_NAME"
+        
+        machinectl terminate "$CONTAINER_NAME" 2>/dev/null || true
+        machinectl remove "$CONTAINER_NAME" 2>/dev/null || true
+        trap early_cleanup EXIT
+        return 1
+    fi
     
-    # Enable better logging
-    echo "Configuring container logging..."
-    machinectl shell "$CONTAINER_NAME" /usr/bin/mkdir -p /etc/systemd/journald.conf.d/
-    cat > tests/container/rootfs/etc/systemd/journald.conf.d/debug.conf << EOF
-[Journal]
-MaxLevelStore=debug
-MaxLevelSyslog=debug
-ForwardToSyslog=yes
-EOF
+    # Container is running, reinstall the proper cleanup trap
+    echo "Container is running, proceeding with tests..."
+    log_command "17" "container_ready" "machinectl status $CONTAINER_NAME"
+    trap cleanup EXIT
     
     # Run tests in the container
     echo "Running tests in container $CONTAINER_NAME..."
-    machinectl shell "$CONTAINER_NAME" /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
-    TEST_RESULT=$?
+    log_command "20" "start_tests" "echo 'Beginning test execution'"
+    
+    if ! machinectl shell "$CONTAINER_NAME" /usr/bin/bash -c "cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" exec /usr/bin/bash ./test-runner.sh"; then
+        log_command "21" "tests_failed" "echo 'Test execution failed'"
+        TEST_RESULT=1
+    else
+        log_command "21" "tests_succeeded" "echo 'Test execution succeeded'"
+        TEST_RESULT=0
+    fi
     
     # Capture logs for debugging
-    echo "Capturing container logs to tests/logs/$LOG_FILE..."
-    mkdir -p tests/logs
-    journalctl -M "$CONTAINER_NAME" > "tests/logs/$LOG_FILE" 2>/dev/null || true
+    echo "Capturing container logs..."
+    log_command "22" "container_journal" "journalctl -M \"$CONTAINER_NAME\""
     
-    # Clean up the container
-    echo "Cleaning up container $CONTAINER_NAME..."
-    machinectl poweroff "$CONTAINER_NAME" || true
-    sleep 2
-    machinectl terminate "$CONTAINER_NAME" || true
-    machinectl remove "$CONTAINER_NAME" || true
+    # Create a summary file
+    echo "Test execution completed with result code: $TEST_RESULT" > "$LOG_SESSION_DIR/summary.log"
+    echo "Container name: $CONTAINER_NAME" >> "$LOG_SESSION_DIR/summary.log"
+    echo "Timestamp: $(date)" >> "$LOG_SESSION_DIR/summary.log"
     
     # Show test results
     if [ $TEST_RESULT -eq 0 ]; then
         echo "All tests passed!"
-        echo "Test logs saved to: tests/logs/$LOG_FILE"
+        echo "Test logs saved to: $LOG_SESSION_DIR"
     else
-        echo "Some tests failed. Check logs in tests/logs/$LOG_FILE"
+        echo "Some tests failed. Check logs in $LOG_SESSION_DIR"
     fi
     
     return $TEST_RESULT
@@ -334,9 +481,15 @@ main() {
     
     # Either install or run tests
     if [ "$TEST_MODE" = true ]; then
-        run_tests
+        if ! run_tests; then
+            echo "Tests failed or encountered an error."
+            exit 1
+        fi
     elif [ "$INSTALL_MODE" = true ]; then
-        do_install "$PREFIX"
+        if ! do_install "$PREFIX"; then
+            echo "Installation failed."
+            exit 1
+        fi
     fi
 }
 
