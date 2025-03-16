@@ -111,7 +111,7 @@ copy_with_deps() {
     
     if [ ! -f "$file" ]; then
         return
-    fi  # This was incorrectly a curly brace
+    fi
     
     # Create destination directory
     local dir_path=$(dirname "$file")
@@ -132,9 +132,9 @@ copy_with_deps() {
     done
 }
 
-# Run tests in a container
+# Run tests using machinectl
 run_tests() {
-    echo "Running tests in container..."
+    echo "Running tests with machinectl..."
     
     # Check if we have root privileges
     if [ "$EUID" -ne 0 ]; then
@@ -146,29 +146,24 @@ run_tests() {
     # Set up cleanup trap to ensure cleanup happens even on errors
     cleanup() {
         echo "Cleaning up test environment..."
+        # Clean up any existing containers
+        machinectl list | grep "btrfs-test-" | awk '{print $1}' | while read machine; do
+            echo "Cleaning up container: $machine"
+            machinectl terminate "$machine" 2>/dev/null || true
+            machinectl remove "$machine" 2>/dev/null || true
+        done
         rm -rf tests/container
         rm -f /tmp/test-*.sh.tmp
     }
     trap cleanup EXIT
     
-    # Create test container
+    # Create test container directory
     mkdir -p tests/container/rootfs
     
     if [ ! -d tests/container/rootfs/bin ]; then
         echo "Setting up test container..."
         
-        # Try different methods to create container
-        if command -v docker >/dev/null 2>&1; then
-            echo "Using Docker to create container..."
-            docker pull archlinux:latest
-            container_id=$(docker create archlinux:latest)
-            docker export $container_id | tar -x -C tests/container/rootfs
-            docker rm $container_id
-            
-            # Install required packages in the container
-            echo "Installing required packages in container..."
-            systemd-nspawn -D tests/container/rootfs --pipe /bin/bash -c "pacman -Sy --noconfirm btrfs-progs snapper"
-        elif [ -f /etc/arch-release ] && command -v pacman >/dev/null 2>&1; then
+        if [ -f /etc/arch-release ] && command -v pacman >/dev/null 2>&1; then
             echo "Creating minimal container environment..."
             
             # Create basic directory structure
@@ -218,7 +213,8 @@ run_tests() {
             # Create minimal snapper config directory
             mkdir -p tests/container/rootfs/etc/snapper/configs
         else
-            echo "Error: Could not create container. Please install Docker or use Arch Linux."
+            echo "Error: This script requires Arch Linux for container creation."
+            echo "Please install Arch Linux or modify this script for your distribution."
             exit 1
         fi
     else
@@ -247,43 +243,68 @@ run_tests() {
     
     # Create test disk images
     echo "Creating test disk images..."
-    mkdir -p tests/container/rootfs/images    # Remove the /root prefix
+    mkdir -p tests/container/rootfs/images
     dd if=/dev/zero of=tests/container/rootfs/images/target-disk.img bs=1M count=500 status=none
     dd if=/dev/zero of=tests/container/rootfs/images/backup-disk.img bs=1M count=300 status=none
 
-    # Set up loop devices in container
-    echo "Setting up loop devices in container..."
-    mkdir -p tests/container/rootfs/dev
-    mknod -m 660 tests/container/rootfs/dev/loop8 b 7 8 2>/dev/null || true
-    mknod -m 660 tests/container/rootfs/dev/loop9 b 7 9 2>/dev/null || true
-    mknod -m 660 tests/container/rootfs/dev/loop10 b 7 10 2>/dev/null || true
-
-    # Run with appropriate device permissions
-    systemd-nspawn --directory=tests/container/rootfs \
-        --bind=/dev \
-        --bind=/sys/fs/btrfs \
-        --capability=all \
-        --property="DeviceAllow=block-loop rw" \
-        --property="DeviceAllow=/dev/loop* rw" \
-        --bind-ro=/bin/mknod:/bin/mknod \
-        --bind-ro=/bin/losetup:/bin/losetup \
-        --bind-ro=/usr/bin/find:/usr/bin/find \ 
-        --console=pipe \
-            /usr/bin/bash -c "cd / && exec /usr/bin/bash /root/test-runner.sh"
+    # Generate unique container name
+    CONTAINER_NAME="btrfs-test-$(date +%Y%m%d-%H%M%S)"
+    LOG_FILE="container-$(date +%Y%m%d-%H%M%S).log"
     
+    # Clean up any existing container with similar name (safety check)
+    machinectl list | grep "btrfs-test-" | awk '{print $1}' | while read machine; do
+        echo "Cleaning up existing container: $machine"
+        machinectl terminate "$machine" 2>/dev/null || true
+        machinectl remove "$machine" 2>/dev/null || true
+    done
+    
+    # Import container filesystem
+    echo "Importing container filesystem as $CONTAINER_NAME..."
+    machinectl import-fs tests/container/rootfs "$CONTAINER_NAME"
+    
+    # Start the container
+    echo "Starting container $CONTAINER_NAME..."
+    machinectl start "$CONTAINER_NAME"
+    
+    # Give container time to start up
+    sleep 3
+    
+    # Enable better logging
+    echo "Configuring container logging..."
+    machinectl shell "$CONTAINER_NAME" /usr/bin/mkdir -p /etc/systemd/journald.conf.d/
+    cat > tests/container/rootfs/etc/systemd/journald.conf.d/debug.conf << EOF
+[Journal]
+MaxLevelStore=debug
+MaxLevelSyslog=debug
+ForwardToSyslog=yes
+EOF
+    
+    # Run tests in the container
+    echo "Running tests in container $CONTAINER_NAME..."
+    machinectl shell "$CONTAINER_NAME" /usr/bin/bash -c "cd /root && exec /usr/bin/bash ./test-runner.sh"
     TEST_RESULT=$?
     
-    # Store result before trap cleanup runs
+    # Capture logs for debugging
+    echo "Capturing container logs to tests/logs/$LOG_FILE..."
+    mkdir -p tests/logs
+    journalctl -M "$CONTAINER_NAME" > "tests/logs/$LOG_FILE" 2>/dev/null || true
+    
+    # Clean up the container
+    echo "Cleaning up container $CONTAINER_NAME..."
+    machinectl poweroff "$CONTAINER_NAME" || true
+    sleep 2
+    machinectl terminate "$CONTAINER_NAME" || true
+    machinectl remove "$CONTAINER_NAME" || true
+    
+    # Show test results
     if [ $TEST_RESULT -eq 0 ]; then
         echo "All tests passed!"
-        FINAL_RESULT=0
+        echo "Test logs saved to: tests/logs/$LOG_FILE"
     else
-        echo "Some tests failed."
-        FINAL_RESULT=1
+        echo "Some tests failed. Check logs in tests/logs/$LOG_FILE"
     fi
     
-    # Cleanup happens automatically via trap
-    return $FINAL_RESULT
+    return $TEST_RESULT
 }
 
 # Main function
@@ -321,4 +342,3 @@ main() {
 
 # Run main function
 main "$@"
-
