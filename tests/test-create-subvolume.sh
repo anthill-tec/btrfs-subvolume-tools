@@ -51,10 +51,21 @@ TARGET_IMAGE="/root/images/target-disk.img"
 BACKUP_IMAGE="/root/images/backup-disk.img"
 
 echo -e "Setting up loop devices..."
-TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
-BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")
-echo -e "  Target device: $TARGET_DEVICE"
-echo -e "  Backup device: $BACKUP_DEVICE"
+# Check if we're in a container environment
+if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
+    # Container-specific setup with explicit loop devices
+    echo -e "Using container-specific loop device setup"
+    mknod -m 660 /dev/loop8 b 7 8 2>/dev/null || true
+    losetup /dev/loop8 "$TARGET_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
+    TARGET_DEVICE="/dev/loop8"
+    mknod -m 660 /dev/loop9 b 7 9 2>/dev/null || true
+    losetup /dev/loop9 "$BACKUP_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
+    BACKUP_DEVICE="/dev/loop9"
+else
+    # Standard setup for non-container environments
+    TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
+    BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")
+fi
 
 echo -e "Formatting devices with btrfs..."
 mkfs.btrfs -f "$TARGET_DEVICE"
@@ -129,8 +140,14 @@ fi
 echo -e "${YELLOW}Cleaning up test environment...${NC}"
 umount "$TARGET_MOUNT" || true
 umount "$BACKUP_MOUNT" || true
-losetup -d "$TARGET_DEVICE" || true
-losetup -d "$BACKUP_DEVICE" || true
+# Check if we're in a container environment
+if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
+    losetup -d /dev/loop8 || true
+    losetup -d /dev/loop9 || true
+else
+    losetup -d "$TARGET_DEVICE" || true
+    losetup -d "$BACKUP_DEVICE" || true
+fi
 rm -rf "$TEST_DIR"
 echo -e "${GREEN}Cleanup complete${NC}"
 
