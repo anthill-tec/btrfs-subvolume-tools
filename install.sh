@@ -180,9 +180,30 @@ run_tests() {
     if [ ! -d tests/container/rootfs/bin ]; then
         echo "Setting up test container..."
         
-        if [ -f /etc/arch-release ] && command -v pacman >/dev/null 2>&1; then
-            echo "Creating minimal container environment..."
+        # Check for pacstrap and install if missing
+        if ! command -v pacstrap >/dev/null 2>&1; then
+            echo "Pacstrap not found. Attempting to install it..."
             
+            if command -v yay >/dev/null 2>&1; then
+                echo "Installing arch-install-scripts using yay..."
+                yay -S --noconfirm arch-install-scripts
+            elif command -v pacman >/dev/null 2>&1; then
+                echo "Installing arch-install-scripts using pacman..."
+                pacman -S --noconfirm arch-install-scripts
+            else
+                echo "Warning: Could not install pacstrap. Neither yay nor pacman found."
+            fi
+        fi
+        
+        if command -v pacstrap >/dev/null 2>&1; then
+            echo "Creating minimal Arch container using pacstrap..."
+            # Create basic directory structure first
+            mkdir -p tests/container/rootfs
+            # Use pacstrap to create a minimal but complete Arch system
+            pacstrap -c -d tests/container/rootfs base systemd bash btrfs-progs snapper
+        elif [ -f /etc/arch-release ] && command -v pacman >/dev/null 2>&1; then
+            echo "Pacstrap not found. Creating minimal container environment manually..."
+            # Fallback to manual setup if pacstrap isn't available
             # Create basic directory structure
             mkdir -p tests/container/rootfs/{bin,sbin,lib,lib64,usr/{bin,sbin,lib},etc,var,dev,sys,proc,run,tmp}
             chmod 1777 tests/container/rootfs/tmp
@@ -197,7 +218,7 @@ run_tests() {
             
             # Copy required executables and libraries
             echo "Copying required executables and libraries..."
-            for pkg in coreutils bash util-linux btrfs-progs snapper; do
+            for pkg in coreutils bash util-linux systemd btrfs-progs snapper; do
                 echo "Processing $pkg package..."
                 pacman -Ql $pkg 2>/dev/null | grep -v '/$' | grep -E '/(s?bin|lib)/' | awk '{print $2}' | while read file; do
                     if [ -f "$file" ] && [ -x "$file" ]; then
@@ -205,6 +226,7 @@ run_tests() {
                     fi
                 done
             done
+            
             # Copy critical libraries that might not be picked up
             echo "Copying additional critical libraries..."
             for lib in $(ldconfig -p | grep -E 'libreadline|libncurses|libtinfo' | awk '{print $4}'); do
@@ -230,7 +252,7 @@ run_tests() {
             # Create minimal snapper config directory
             mkdir -p tests/container/rootfs/etc/snapper/configs
         else
-            echo "Error: This script requires Arch Linux for container creation."
+            echo "Error: This script requires Arch Linux with either pacstrap or pacman for container creation."
             echo "Please install Arch Linux or modify this script for your distribution."
             exit 1
         fi
@@ -353,7 +375,7 @@ run_tests() {
         echo "Capturing detailed startup failure logs..."
         log_command "09" "status_after_start_failure" "machinectl status $CONTAINER_NAME"
         log_command "10" "machined_log_after_start" "journalctl -u systemd-machined.service -n 50"
-        log_command "11" "importctl_list" "importctl list machine" 
+        log_command "11" "importctl_list" "importctl list-images" 
         log_command "12" "journal_container_messages" "journalctl -xb --grep=\"$CONTAINER_NAME\""
         
         # Try alternative approach if first method failed
