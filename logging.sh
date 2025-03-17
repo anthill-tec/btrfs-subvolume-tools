@@ -1,125 +1,136 @@
 #!/bin/bash
-# logging.sh - Contains functions for the phase-based logging system
+# A simpler logging system for the BTRFS Subvolume Tools tests
 
-# Initialize global variables for log files
-PHASE1_LOG=""
-PHASE2_LOG=""
-PHASE3_LOG=""
-PHASE4_LOG=""
-PHASE5_LOG=""
-SUMMARY_LOG=""
+# Global log directory
+LOG_DIR=""
 
-# Set up logging directory structure and initialize log files
-setup_logging() {
+# Initialize the logging system
+init_logging() {
     local container_name="$1"
     
-    # Create log directories
-    LOG_BASE_DIR="tests/logs"
-    LOG_SESSION_DIR="$LOG_BASE_DIR/$container_name"
-    mkdir -p "$LOG_SESSION_DIR"
+    # Create log directory structure
+    LOG_DIR="tests/logs/$container_name"
+    mkdir -p "$LOG_DIR"
     
-    # Initialize log files for each phase
-    PHASE1_LOG="$LOG_SESSION_DIR/01_pre_installation.log"
-    PHASE2_LOG="$LOG_SESSION_DIR/02_tool_setup.log"
-    PHASE3_LOG="$LOG_SESSION_DIR/03_test_configuration.log"
-    PHASE4_LOG="$LOG_SESSION_DIR/04_test_execution.log"
-    PHASE5_LOG="$LOG_SESSION_DIR/05_cleanup_results.log"
+    # Create and initialize the summary log
+    local summary_file="$LOG_DIR/00_summary.log"
+    cat > "$summary_file" << EOF
+==================================================
+  BTRFS Subvolume Tools Test Run
+  Session: $container_name
+  Started: $(date '+%Y-%m-%d %H:%M:%S')
+==================================================
+
+EOF
     
-    # Create empty log files
-    > "$PHASE1_LOG"
-    > "$PHASE2_LOG"
-    > "$PHASE3_LOG"
-    > "$PHASE4_LOG"
-    > "$PHASE5_LOG"
+    # Create empty phase log files
+    touch "$LOG_DIR/01_pre_installation.log"
+    touch "$LOG_DIR/02_tool_setup.log"
+    touch "$LOG_DIR/03_test_configuration.log"
+    touch "$LOG_DIR/04_test_execution.log"
+    touch "$LOG_DIR/05_cleanup_results.log"
     
-    # Create a summary log
-    SUMMARY_LOG="$LOG_SESSION_DIR/00_summary.log"
-    
-    # Add header to summary log
-    echo "======================================================" > "$SUMMARY_LOG"
-    echo "  Test Session: $container_name" >> "$SUMMARY_LOG"
-    echo "  Started at: $(date '+%Y-%m-%d %H:%M:%S')" >> "$SUMMARY_LOG"
-    echo "======================================================" >> "$SUMMARY_LOG"
-    echo "" >> "$SUMMARY_LOG"
-    echo "PHASE SUMMARY:" >> "$SUMMARY_LOG"
-    echo "" >> "$SUMMARY_LOG"
-    
-    # Return the log directory for reference
-    echo "$LOG_SESSION_DIR"
+    # Return the log directory
+    echo "$LOG_DIR"
 }
 
-# Log a message and optionally execute a command, capturing its output
-log_to_phase() {
-    local phase_num="$1"
+# Log a message to a specific phase
+log_phase() {
+    local phase="$1"
     local message="$2"
-    local command="$3"
-    local log_file
     
-    # Select the appropriate log file
-    case "$phase_num" in
-        1) log_file="$PHASE1_LOG" ;;
-        2) log_file="$PHASE2_LOG" ;;
-        3) log_file="$PHASE3_LOG" ;;
-        4) log_file="$PHASE4_LOG" ;;
-        5) log_file="$PHASE5_LOG" ;;
-        *) echo "Invalid phase number: $phase_num"; return 1 ;;
+    # Map phase number to log file
+    local log_file
+    case "$phase" in
+        1) log_file="$LOG_DIR/01_pre_installation.log" ;;
+        2) log_file="$LOG_DIR/02_tool_setup.log" ;;
+        3) log_file="$LOG_DIR/03_test_configuration.log" ;;
+        4) log_file="$LOG_DIR/04_test_execution.log" ;;
+        5) log_file="$LOG_DIR/05_cleanup_results.log" ;;
+        *)
+            echo "Invalid phase number: $phase"
+            return 1
+            ;;
     esac
     
-    # Add a timestamp and message
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - $message" >> "$log_file"
+    # Append message to the phase log
+    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "$log_file"
     
-    # If a command was provided, execute it and log its output
-    if [ -n "$command" ]; then
-        echo "" >> "$log_file"  # Empty line for readability
-        echo "===== COMMAND: $command =====" >> "$log_file"
-        echo "" >> "$log_file"  # Empty line for readability
-        
-        # Execute command and capture its output to the log file
-        eval "$command" >> "$log_file" 2>&1
-        local cmd_status=$?
-        
-        if [ $cmd_status -ne 0 ]; then
-            echo "" >> "$log_file"  # Empty line for readability
-            echo "Command failed with exit code $cmd_status" >> "$log_file"
-        fi
-        
-        echo "" >> "$log_file"  # Empty line for readability
-        echo "===== END COMMAND OUTPUT =====" >> "$log_file"
-        echo "" >> "$log_file"  # Empty line for readability
-    fi
+    # Also add to summary
+    echo "[Phase $phase] $message" >> "$LOG_DIR/00_summary.log"
     
-    # Also log to the summary file
-    echo "$(date '+%Y-%m-%d %H:%M:%S') - Phase $phase_num: $message" >> "$SUMMARY_LOG"
-    
-    # Also print to stdout for real-time monitoring
-    echo "Phase $phase_num: $message"
-    
-    # Return the command's exit status if there was a command
-    if [ -n "$command" ]; then
-        return $cmd_status
-    fi
-    return 0
+    # Print to console
+    echo "Phase $phase: $message"
 }
 
-# Add a final summary to the log
-finalize_log_summary() {
-    local result_code="$1"
-    local test_duration="$2"
+# Execute a command and log its output
+run_cmd() {
+    local phase="$1"
+    local cmd_desc="$2"
+    local command="$3"
     
-    echo "" >> "$SUMMARY_LOG"
-    echo "======================================================" >> "$SUMMARY_LOG"
-    echo "  Test Result: $([ $result_code -eq 0 ] && echo "SUCCESS" || echo "FAILURE")" >> "$SUMMARY_LOG"
-    echo "  Exit Code: $result_code" >> "$SUMMARY_LOG"
-    echo "  Completed at: $(date '+%Y-%m-%d %H:%M:%S')" >> "$SUMMARY_LOG"
-    echo "  Duration: $test_duration seconds" >> "$SUMMARY_LOG"
-    echo "======================================================" >> "$SUMMARY_LOG"
+    # Log the command
+    log_phase "$phase" "$cmd_desc"
     
-    # Add file locations for easy reference
-    echo "" >> "$SUMMARY_LOG"
-    echo "LOG FILES:" >> "$SUMMARY_LOG"
-    echo "  Phase 1 (Pre-installation): $PHASE1_LOG" >> "$SUMMARY_LOG"
-    echo "  Phase 2 (Tool Setup): $PHASE2_LOG" >> "$SUMMARY_LOG"
-    echo "  Phase 3 (Test Configuration): $PHASE3_LOG" >> "$SUMMARY_LOG"
-    echo "  Phase 4 (Test Execution): $PHASE4_LOG" >> "$SUMMARY_LOG"
-    echo "  Phase 5 (Cleanup & Results): $PHASE5_LOG" >> "$SUMMARY_LOG"
+    # Map phase number to log file
+    local log_file
+    case "$phase" in
+        1) log_file="$LOG_DIR/01_pre_installation.log" ;;
+        2) log_file="$LOG_DIR/02_tool_setup.log" ;;
+        3) log_file="$LOG_DIR/03_test_configuration.log" ;;
+        4) log_file="$LOG_DIR/04_test_execution.log" ;;
+        5) log_file="$LOG_DIR/05_cleanup_results.log" ;;
+        *)
+            echo "Invalid phase number: $phase"
+            return 1
+            ;;
+    esac
+    
+    # Create a clear command block header in the log
+    cat >> "$log_file" << EOF
+
+-------------------------------------------------
+COMMAND: $command
+-------------------------------------------------
+
+EOF
+    
+    # Run the command and capture output
+    # Deliberately use a subshell to isolate redirection
+    (
+        set -o pipefail
+        eval "$command" 2>&1 | tee -a "$log_file"
+    )
+    local status=${PIPESTATUS[0]}
+    
+    # Log the command status
+    cat >> "$log_file" << EOF
+
+-------------------------------------------------
+COMMAND EXIT STATUS: $status
+-------------------------------------------------
+
+EOF
+    
+    return $status
+}
+
+# Finalize the logs with a summary
+finalize_logs() {
+    local result="$1"
+    local duration="$2"
+    
+    # Add the summary footer
+    cat >> "$LOG_DIR/00_summary.log" << EOF
+
+==================================================
+  Test Results
+--------------------------------------------------
+  Result: $([ "$result" -eq 0 ] && echo "SUCCESS" || echo "FAILURE")
+  Exit Code: $result
+  Duration: $duration seconds
+  Completed: $(date '+%Y-%m-%d %H:%M:%S')
+==================================================
+
+EOF
 }
