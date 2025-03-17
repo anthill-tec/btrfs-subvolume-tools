@@ -1,8 +1,11 @@
 #!/bin/bash
-# A simpler logging system for the BTRFS Subvolume Tools tests
+# A simpler logging system for the BTRFS Subvolume Tools tests with debug mode support
 
 # Global log directory
 LOG_DIR=""
+
+# Debug mode flag - can be set from the environment
+DEBUG_MODE="${DEBUG_MODE:-false}"
 
 # Initialize the logging system
 init_logging() {
@@ -19,6 +22,7 @@ init_logging() {
   BTRFS Subvolume Tools Test Run
   Session: $container_name
   Started: $(date '+%Y-%m-%d %H:%M:%S')
+  Debug Mode: $DEBUG_MODE
 ==================================================
 
 EOF
@@ -99,7 +103,13 @@ EOF
     # Deliberately use a subshell to isolate redirection
     (
         set -o pipefail
-        eval "$command" 2>&1 | tee -a "$log_file"
+        # In debug mode, output to both log file and console
+        # In normal mode, output only to log file
+        if [ "$DEBUG_MODE" = "true" ]; then
+            eval "$command" 2>&1 | tee -a "$log_file"
+        else
+            eval "$command" >> "$log_file" 2>&1
+        fi
     )
     local status=${PIPESTATUS[0]}
     
@@ -130,7 +140,21 @@ finalize_logs() {
   Exit Code: $result
   Duration: $duration seconds
   Completed: $(date '+%Y-%m-%d %H:%M:%S')
+  Debug Mode: $DEBUG_MODE
 ==================================================
 
 EOF
+
+    # If there was a failure and we're not in debug mode, suggest enabling debug mode
+    if [ "$result" -ne 0 ] && [ "$DEBUG_MODE" != "true" ]; then
+        echo "Tests failed. For more detailed output, run with DEBUG_MODE=true:"
+        echo "  DEBUG_MODE=true sudo make test"
+        echo "Full logs are available at: $LOG_DIR"
+    fi
+}
+
+# Set debug mode from environment variable
+set_debug_mode() {
+    local mode="${1:-false}"
+    DEBUG_MODE="$mode"
 }

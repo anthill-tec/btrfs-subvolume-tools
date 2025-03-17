@@ -50,6 +50,14 @@ test:
 	fi
 	@PROJECT_NAME="$(PROJECT_NAME)" ./install.sh --test
 
+debug-test:
+	@echo "Running tests in debug mode (requires root privileges)..."
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "Please run: sudo make debug-test"; \
+		exit 1; \
+	fi
+	@DEBUG_MODE=true PROJECT_NAME="$(PROJECT_NAME)" ./install.sh --test
+
 test-clean:
 	@echo "Cleaning up test environment..."
 	@rm -rf tests/container
