@@ -284,8 +284,9 @@ run_tests() {
     log_phase 2 "Copying test scripts"
     TEST_RUNNER_NAME=$(basename "$(find tests -name "test-runner.sh" | head -n 1)")
     find tests -name "test-*.sh" ! -name "$TEST_RUNNER_NAME" | while read script; do
-        # FIX 1: Fix quote issue in the command - remove the extra quote at the end
-        run_cmd 2 "Copying: $script" "cp \"$script\" tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/$(basename \"$script\")"
+        # FIX 1: Fix quote issue - completely reformatted the command to avoid quotes inside quotes
+        script_basename=$(basename "$script")
+        run_cmd 2 "Copying: $script" "cp $script tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/$script_basename"
     done
     
     # Create test disk images
@@ -397,28 +398,29 @@ run_tests() {
     run_cmd 4 "Getting container status" "machinectl status \"$CONTAINER_NAME\""
     
     # Check shell availability in the container
-    run_cmd 4 "Checking shell in container" "machinectl shell \"$CONTAINER_NAME\" ls -la /bin/sh || machinectl shell \"$CONTAINER_NAME\" ls -la /usr/bin/sh"
+    run_cmd 4 "Checking shell in container" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /bin/sh || ls -la /usr/bin/sh'"
     
-    # Determine the shell path in the container
-    SHELL_PATH="/bin/sh"
-    if ! machinectl shell "$CONTAINER_NAME" test -f "/bin/sh" >/dev/null 2>&1; then
-        if machinectl shell "$CONTAINER_NAME" test -f "/usr/bin/sh" >/dev/null 2>&1; then
-            SHELL_PATH="/usr/bin/sh"
-        fi
-    fi
+    # List test scripts inside the container to verify they were copied correctly
+    run_cmd 4 "Listing test scripts in container" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /root/test*.sh'"
     
     # Execute the test runner
     if [ "$DEBUG_MODE" = "true" ]; then
         # In debug mode, show output in real-time
-        run_cmd 4 "Running test-runner.sh in container with $SHELL_PATH" "machinectl shell \"$CONTAINER_NAME\" $SHELL_PATH -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" $SHELL_PATH ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
+        run_cmd 4 "Running test-runner.sh in container with /bin/sh" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
     else
         # In normal mode, capture output to file only
-        run_cmd 4 "Running test-runner.sh in container with $SHELL_PATH" "machinectl shell \"$CONTAINER_NAME\" $SHELL_PATH -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" $SHELL_PATH ./test-runner.sh' > \"$TEST_OUTPUT_FILE\" 2>&1"
+        run_cmd 4 "Running test-runner.sh in container with /bin/sh" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' > \"$TEST_OUTPUT_FILE\" 2>&1"
     fi
     TEST_RESULT=$?
     
     # Check test output file
     run_cmd 4 "Checking test output" "cat \"$TEST_OUTPUT_FILE\" || echo 'No output found'"
+    
+    # FIX 3: Check if tests actually ran or if there was an error finding test scripts
+    if grep -q "Error: No test scripts found" "$TEST_OUTPUT_FILE"; then
+        log_phase 4 "Test script error: No test scripts were found in the container"
+        TEST_RESULT=1
+    fi
     
     # Phase 5: Cleanup and results
     log_phase 5 "Starting cleanup and results phase"
