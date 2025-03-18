@@ -13,6 +13,14 @@ else
     exit 1
 fi
 
+# Source the loop device utilities
+if [ -f "$SCRIPT_DIR/loop-device-utils.sh" ]; then
+    source "$SCRIPT_DIR/loop-device-utils.sh"
+else
+    echo "Error: loop-device-utils.sh not found"
+    exit 1
+fi
+
 # Define subroutines
 
 # Show help
@@ -176,6 +184,10 @@ run_tests() {
             run_cmd 5 "Terminate container" "machinectl terminate \"$CONTAINER_NAME\" 2>/dev/null || true"
             run_cmd 5 "Remove container" "machinectl remove \"$CONTAINER_NAME\" 2>/dev/null || true"
         fi
+        
+        # Clean up loop devices
+        cleanup_loop_devices
+        
         rm -rf tests/container 2>/dev/null || true
         rm -f /tmp/test-*.sh.tmp 2>/dev/null || true
     }
@@ -280,14 +292,9 @@ run_tests() {
     # Copy the test-runner script
     run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
     
-    # Find and copy all test scripts (except test-runner.sh itself)
-    log_phase 2 "Copying test scripts"
-    TEST_RUNNER_NAME=$(basename "$(find tests -name "test-runner.sh" | head -n 1)")
-    find tests -name "test-*.sh" ! -name "$TEST_RUNNER_NAME" | while read script; do
-        # Fixed command to avoid quoting issues
-        script_basename=$(basename "$script")
-        run_cmd 2 "Copying: $script" "cp $script tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/$script_basename"
-    done
+    # Copy the test scripts directly
+    run_cmd 2 "Copying test-create-subvolume.sh" "cp -v tests/test-create-subvolume.sh tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/test-create-subvolume.sh"
+    run_cmd 2 "Copying test-configure-snapshots.sh" "cp -v tests/test-configure-snapshots.sh tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/test-configure-snapshots.sh"
     
     # Create test disk images
     log_phase 2 "Creating test disk images"
@@ -330,8 +337,11 @@ run_tests() {
     run_cmd 3 "Copying test scripts to imported container" "cp -r tests/container/rootfs/root/* /var/lib/machines/$CONTAINER_NAME/root/"
     run_cmd 3 "Copying test images" "cp tests/container/rootfs/images/*.img /var/lib/machines/$CONTAINER_NAME/images/"
     
-    # Create a drop-in configuration file for the machine to set the required properties
-    run_cmd 3 "Creating machine configuration" "mkdir -p /etc/systemd/nspawn && echo -e \"[Exec]\\nCapability=all\\n[DeviceAllow]\\nProperty=block-loop\\nValue=rw\" > /etc/systemd/nspawn/$CONTAINER_NAME.nspawn"
+    # Prepare for loop device setup
+    run_cmd 3 "Preparing container and loop devices" "mkdir -p /etc/systemd/nspawn"
+    
+    # Apply loop device fixes
+    apply_loop_device_fixes "$CONTAINER_NAME"
     
     # Start the container using machinectl
     run_cmd 3 "Starting container" "machinectl start \"$CONTAINER_NAME\""
@@ -374,9 +384,8 @@ run_tests() {
     # Create the expected directory structure for images in the container
     run_cmd 3 "Creating expected image structure in container" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'mkdir -p /images && ln -sf /var/lib/machines/$CONTAINER_NAME/images/* /images/'"
     
-    # Set up loop devices in the container
-    run_cmd 3 "Loading loop module in container" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'modprobe loop || true'"
-    run_cmd 3 "Creating loop device nodes" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'for i in {0..9}; do mknod -m 660 /dev/loop\$i b 7 \$i 2>/dev/null || true; done'"
+    # Make sure loop_devices.conf is accessible in the container
+    run_cmd 3 "Copying loop device configuration to container root" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cp /loop_devices.conf / && chmod 644 /loop_devices.conf'"
     
     # Container is running, reinstall the proper cleanup trap
     log_phase 3 "Container is running, proceeding with tests..."
@@ -404,6 +413,7 @@ run_tests() {
     # Verify the directory structure and loop devices
     run_cmd 4 "Verifying image symlinks" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /images/'"
     run_cmd 4 "Checking loop device availability" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /dev/loop* || echo \"No loop devices found\"'"
+    run_cmd 4 "Checking loop_devices.conf" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cat /loop_devices.conf || echo \"No loop_devices.conf found\"'"
     
     # Execute the test runner
     if [ "$DEBUG_MODE" = "true" ]; then

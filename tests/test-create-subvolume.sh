@@ -66,23 +66,36 @@ echo -e "Found target image: $TARGET_IMAGE"
 echo -e "Found backup image: $BACKUP_IMAGE"
 
 echo -e "Setting up loop devices..."
-# Check if we're in a container environment
-if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-    # Container-specific setup with explicit loop devices
-    echo -e "Using container-specific loop device setup"
-    mknod -m 660 /dev/loop8 b 7 8 2>/dev/null || true
-    losetup /dev/loop8 "$TARGET_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
-    TARGET_DEVICE="/dev/loop8"
-    mknod -m 660 /dev/loop9 b 7 9 2>/dev/null || true
-    losetup /dev/loop9 "$BACKUP_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
-    BACKUP_DEVICE="/dev/loop9"
+
+# Check if pre-configured loop devices are available
+if [ -f "/loop_devices.conf" ]; then
+    echo "Using pre-configured loop devices from host"
+    source /loop_devices.conf
+    TARGET_DEVICE="$TARGET_LOOP"
+    BACKUP_DEVICE="$BACKUP_LOOP"
+    echo -e "  Target device: $TARGET_DEVICE"
+    echo -e "  Backup device: $BACKUP_DEVICE"
+    # Skip further setup since devices are already prepared
 else
-    # Standard setup for non-container environments
-    TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
-    BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")
+    # Check if we're in a container environment
+    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
+        # Container-specific setup with explicit loop devices
+        echo -e "Using container-specific loop device setup"
+        # Fallback if pre-configured devices aren't available
+        mknod -m 660 /dev/loop8 b 7 8 2>/dev/null || true
+        losetup /dev/loop8 "$TARGET_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
+        TARGET_DEVICE="/dev/loop8"
+        mknod -m 660 /dev/loop9 b 7 9 2>/dev/null || true
+        losetup /dev/loop9 "$BACKUP_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
+        BACKUP_DEVICE="/dev/loop9"
+    else
+        # Standard setup for non-container environments
+        TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
+        BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")
+    fi
+    echo -e "  Target device: $TARGET_DEVICE"
+    echo -e "  Backup device: $BACKUP_DEVICE"
 fi
-echo -e "  Target device: $TARGET_DEVICE"
-echo -e "  Backup device: $BACKUP_DEVICE"
 
 echo -e "Formatting devices with btrfs..."
 mkfs.btrfs -f "$TARGET_DEVICE"
@@ -157,14 +170,22 @@ fi
 echo -e "${YELLOW}Cleaning up test environment...${NC}"
 umount "$TARGET_MOUNT" || true
 umount "$BACKUP_MOUNT" || true
-# Check if we're in a container environment
-if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-    losetup -d /dev/loop8 || true
-    losetup -d /dev/loop9 || true
+
+# Check if we're using pre-configured loop devices
+if [ -f "/loop_devices.conf" ]; then
+    # We don't detach pre-configured loop devices, as they're managed by the test framework
+    echo -e "Skipping loop device detach for pre-configured devices"
 else
-    losetup -d "$TARGET_DEVICE" || true
-    losetup -d "$BACKUP_DEVICE" || true
+    # Clean up loop devices we created in this script
+    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
+        losetup -d /dev/loop8 || true
+        losetup -d /dev/loop9 || true
+    else
+        losetup -d "$TARGET_DEVICE" || true
+        losetup -d "$BACKUP_DEVICE" || true
+    fi
 fi
+
 rm -rf "$TEST_DIR"
 echo -e "${GREEN}Cleanup complete${NC}"
 

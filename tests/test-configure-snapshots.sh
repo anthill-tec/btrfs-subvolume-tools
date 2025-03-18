@@ -96,18 +96,27 @@ fi
 echo -e "Found target image: $TARGET_IMAGE"
 
 echo -e "Setting up loop device..."
-# Check if we're in a container environment
-if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-    # Container-specific setup with explicit loop device
-    echo -e "Using container-specific loop device setup"
-    mknod -m 660 /dev/loop10 b 7 10 2>/dev/null || true
-    losetup /dev/loop10 "$TARGET_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
-    TARGET_DEVICE="/dev/loop10"
+
+# Check if pre-configured loop devices are available
+if [ -f "/loop_devices.conf" ]; then
+    echo "Using pre-configured loop devices from host"
+    source /loop_devices.conf
+    TARGET_DEVICE="$TARGET_LOOP"
+    echo -e "  Target device: $TARGET_DEVICE"
 else
-    # Standard setup for non-container environments
-    TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
+    # Check if we're in a container environment
+    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
+        # Container-specific setup with explicit loop device
+        echo -e "Using container-specific loop device setup"
+        mknod -m 660 /dev/loop10 b 7 10 2>/dev/null || true
+        losetup /dev/loop10 "$TARGET_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
+        TARGET_DEVICE="/dev/loop10"
+    else
+        # Standard setup for non-container environments
+        TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
+    fi
+    echo -e "  Target device: $TARGET_DEVICE"
 fi
-echo -e "  Target device: $TARGET_DEVICE"
 
 echo -e "Formatting device with btrfs..."
 mkfs.btrfs -f "$TARGET_DEVICE"
@@ -208,12 +217,20 @@ systemctl disable --now snapper-cleanup.timer &>/dev/null || true
 
 # Unmount and remove test filesystem
 umount "$TARGET_MOUNT" || true
-# Check if we're in a container environment
-if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-    losetup -d /dev/loop10 || true
+
+# Check if we're using pre-configured loop devices
+if [ -f "/loop_devices.conf" ]; then
+    # We don't detach pre-configured loop devices, as they're managed by the test framework
+    echo -e "Skipping loop device detach for pre-configured devices"
 else
-    losetup -d "$TARGET_DEVICE" || true
+    # Clean up loop devices we created in this script
+    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
+        losetup -d /dev/loop10 || true
+    else
+        losetup -d "$TARGET_DEVICE" || true
+    fi
 fi
+
 rm -rf "$TEST_DIR"
 
 # Remove test user if we created one
