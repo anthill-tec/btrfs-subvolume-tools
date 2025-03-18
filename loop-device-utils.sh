@@ -35,6 +35,24 @@ prepare_host_loop_devices() {
       modprobe loop
     fi
   fi
+  
+  # Ensure btrfs-control device exists
+  if [ ! -e "/dev/btrfs-control" ]; then
+    if type run_cmd >/dev/null 2>&1; then
+      run_cmd 3 "Creating /dev/btrfs-control on host" "mknod -m 660 /dev/btrfs-control c 10 234 || true"
+    else
+      echo "Creating /dev/btrfs-control on host"
+      mknod -m 660 /dev/btrfs-control c 10 234 || true
+    fi
+  fi
+  
+  # Fix permissions on btrfs-control to ensure it's accessible
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Setting permissions on btrfs-control" "chmod 666 /dev/btrfs-control || true"
+  else
+    echo "Setting permissions on btrfs-control"
+    chmod 666 /dev/btrfs-control || true
+  fi
 }
 
 # Setup loop devices for disk images
@@ -138,13 +156,18 @@ enhance_container_config() {
     echo "Enhancing container configuration for loop device access"
   fi
   
-  # Create a more robust nspawn configuration
+  # Create a more robust nspawn configuration with necessary capabilities
   cat > "$config_file" << EOF
 [Exec]
 Capability=all
+SystemCallFilter=@mount
+SystemCallFilter=@swap
+SystemCallFilter=@privileged
 
 [Files]
 BindReadOnly=/dev/loop-control
+# Bind btrfs-control device for btrfs operations
+Bind=/dev/btrfs-control
 EOF
 
   # Bind all loop devices with read/write access
@@ -159,6 +182,10 @@ EOF
 [DeviceAllow]
 Property=block-loop
 Value=rw
+
+# Allow btrfs-control device
+Property=char-misc
+Value=rw
 EOF
 
   # Report success
@@ -169,13 +196,15 @@ EOF
   fi
 }
 
-# Clean up loop devices
+# Clean up loop devices and restore system state
 cleanup_loop_devices() {
+  local container_name="$1"
+  
   # Log this operation if logging functions are available
   if type log_phase >/dev/null 2>&1; then
-    log_phase 5 "Cleaning up loop devices"
+    log_phase 5 "Cleaning up loop devices and restoring system state"
   else
-    echo "Cleaning up loop devices"
+    echo "Cleaning up loop devices and restoring system state"
   fi
   
   # Detach any loop devices we created
@@ -186,6 +215,16 @@ cleanup_loop_devices() {
       echo "Detaching target loop device: $TARGET_LOOP"
       losetup -d "$TARGET_LOOP" 2>/dev/null || true
     fi
+    
+    # Restore original permissions if loop device still exists
+    if [ -e "$TARGET_LOOP" ]; then
+      if type run_cmd >/dev/null 2>&1; then
+        run_cmd 5 "Restoring permissions on $TARGET_LOOP" "chmod 660 \"$TARGET_LOOP\" 2>/dev/null || true"
+      else
+        echo "Restoring permissions on $TARGET_LOOP"
+        chmod 660 "$TARGET_LOOP" 2>/dev/null || true
+      fi
+    fi
   fi
   
   if [ -n "$BACKUP_LOOP" ]; then
@@ -195,53 +234,46 @@ cleanup_loop_devices() {
       echo "Detaching backup loop device: $BACKUP_LOOP"
       losetup -d "$BACKUP_LOOP" 2>/dev/null || true
     fi
+    
+    # Restore original permissions if loop device still exists
+    if [ -e "$BACKUP_LOOP" ]; then
+      if type run_cmd >/dev/null 2>&1; then
+        run_cmd 5 "Restoring permissions on $BACKUP_LOOP" "chmod 660 \"$BACKUP_LOOP\" 2>/dev/null || true"
+      else
+        echo "Restoring permissions on $BACKUP_LOOP"
+        chmod 660 "$BACKUP_LOOP" 2>/dev/null || true
+      fi
+    fi
+  fi
+  
+  # Restore btrfs-control permissions if it exists and we modified it
+  if [ -e "/dev/btrfs-control" ]; then
+    if type run_cmd >/dev/null 2>&1; then
+      run_cmd 5 "Restoring permissions on btrfs-control" "chmod 660 /dev/btrfs-control 2>/dev/null || true"
+    else
+      echo "Restoring permissions on btrfs-control"
+      chmod 660 /dev/btrfs-control 2>/dev/null || true
+    fi
+  fi
+  
+  # Remove the container configuration file if it exists
+  if [ -n "$container_name" ] && [ -f "/etc/systemd/nspawn/$container_name.nspawn" ]; then
+    if type run_cmd >/dev/null 2>&1; then
+      run_cmd 5 "Removing container configuration" "rm -f \"/etc/systemd/nspawn/$container_name.nspawn\" 2>/dev/null || true"
+    else
+      echo "Removing container configuration"
+      rm -f "/etc/systemd/nspawn/$container_name.nspawn" 2>/dev/null || true
+    fi
   fi
   
   # Clear the variables
   TARGET_LOOP=""
   BACKUP_LOOP=""
-}
-
-# Main function to apply all loop device fixes
-apply_loop_device_fixes() {
-  local container_name="$1"
   
-  # Check for required argument
-  if [ -z "$container_name" ]; then
-    if type log_phase >/dev/null 2>&1; then
-      log_phase 3 "Error: Container name not provided to apply_loop_device_fixes"
-    else
-      echo "Error: Container name not provided to apply_loop_device_fixes"
-    fi
-    return 1
-  fi
-  
-  # Log this operation if logging functions are available
+  # Log completion
   if type log_phase >/dev/null 2>&1; then
-    log_phase 3 "Applying all loop device fixes for container: $container_name"
+    log_phase 5 "System state restoration complete"
   else
-    echo "Applying all loop device fixes for container: $container_name"
+    echo "System state restoration complete"
   fi
-  
-  # Apply all fixes in sequence
-  prepare_host_loop_devices
-  setup_test_images_on_host
-  enhance_container_config "$container_name"
-  
-  # Copy the loop device configuration to the container
-  if type run_cmd >/dev/null 2>&1; then
-    run_cmd 3 "Copying loop device configuration" "cp tests/container/rootfs/loop_devices.conf /var/lib/machines/$container_name/"
-  else
-    echo "Copying loop device configuration"
-    cp tests/container/rootfs/loop_devices.conf "/var/lib/machines/$container_name/"
-  fi
-  
-  # Report success
-  if type log_phase >/dev/null 2>&1; then
-    log_phase 3 "All loop device fixes applied successfully"
-  else
-    echo "All loop device fixes applied successfully"
-  fi
-  
-  return 0
 }

@@ -185,8 +185,8 @@ run_tests() {
             run_cmd 5 "Remove container" "machinectl remove \"$CONTAINER_NAME\" 2>/dev/null || true"
         fi
         
-        # Clean up loop devices
-        cleanup_loop_devices
+        # Clean up loop devices - pass the container name for configuration cleanup
+        cleanup_loop_devices "$CONTAINER_NAME"
         
         rm -rf tests/container 2>/dev/null || true
         rm -f /tmp/test-*.sh.tmp 2>/dev/null || true
