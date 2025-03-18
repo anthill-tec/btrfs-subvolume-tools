@@ -284,8 +284,8 @@ run_tests() {
     log_phase 2 "Copying test scripts"
     TEST_RUNNER_NAME=$(basename "$(find tests -name "test-runner.sh" | head -n 1)")
     find tests -name "test-*.sh" ! -name "$TEST_RUNNER_NAME" | while read script; do
-        # Fix quote issue in the command - remove the extra quote at the end
-        run_cmd 2 "Copying: $script" "cp \"$script\" tests/container/rootfs/root/ && chmod +x \"tests/container/rootfs/root/$(basename \"$script\")\""
+        # FIX 1: Fix quote issue in the command - remove the extra quote at the end
+        run_cmd 2 "Copying: $script" "cp \"$script\" tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/$(basename \"$script\")"
     done
     
     # Create test disk images
@@ -349,10 +349,14 @@ run_tests() {
     log_phase 3 "Waiting for container to start..."
     CONTAINER_READY=false
     for i in {1..30}; do
-        if machinectl status "$CONTAINER_NAME" 2>/dev/null | grep -q "State: running"; then
-            run_cmd 3 "Container is now running" "machinectl status \"$CONTAINER_NAME\""
-            CONTAINER_READY=true
-            break
+        # FIX 2: Improved container readiness detection
+        if machinectl status "$CONTAINER_NAME" 2>/dev/null | grep -q "Multi-User System"; then
+            # Try to execute a simple command in the container to verify it's responsive
+            if machinectl shell "$CONTAINER_NAME" /bin/true >/dev/null 2>&1; then
+                run_cmd 3 "Container is now running and responsive" "machinectl status \"$CONTAINER_NAME\""
+                CONTAINER_READY=true
+                break
+            fi
         fi
         run_cmd 3 "Waiting attempt $i/30" "machinectl status \"$CONTAINER_NAME\""
         sleep 2
