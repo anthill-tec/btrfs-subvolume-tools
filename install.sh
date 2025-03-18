@@ -330,19 +330,11 @@ run_tests() {
     run_cmd 3 "Copying test scripts to imported container" "cp -r tests/container/rootfs/root/* /var/lib/machines/$CONTAINER_NAME/root/"
     run_cmd 3 "Copying test images" "cp tests/container/rootfs/images/*.img /var/lib/machines/$CONTAINER_NAME/images/"
     
-    # Start the container with privileges for loop devices
-    run_cmd 3 "Starting container with device privileges" "systemd-nspawn -b -D /var/lib/machines/$CONTAINER_NAME --capability=all --property=DeviceAllow='block-loop rw' --machine=\"$CONTAINER_NAME\" --quiet &"
-    if [ $? -ne 0 ]; then
-        log_phase 3 "Error: Failed to start container with device privileges"
-        run_cmd 3 "Checking errors in log" "journalctl -u systemd-machined -n 50"
-        
-        # Record end time and finalize logs
-        TEST_END_TIME=$(date +%s)
-        TEST_DURATION=$((TEST_END_TIME - TEST_START_TIME))
-        finalize_logs 1 "$TEST_DURATION"
-        
-        return 1
-    fi
+    # Create a drop-in configuration file for the machine to set the required properties
+    run_cmd 3 "Creating machine configuration" "mkdir -p /etc/systemd/nspawn && echo -e \"[Exec]\\nCapability=all\\n[DeviceAllow]\\nProperty=block-loop\\nValue=rw\" > /etc/systemd/nspawn/$CONTAINER_NAME.nspawn"
+    
+    # Start the container using machinectl
+    run_cmd 3 "Starting container" "machinectl start \"$CONTAINER_NAME\""
     
     # Wait for container to be fully running - disable trap during waiting
     trap - EXIT
