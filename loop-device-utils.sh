@@ -94,6 +94,17 @@ setup_test_images_on_host() {
     }
   fi
   
+  # Fix permissions on the loop devices to make them usable in the container
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Setting permissions on target loop device" "chmod 666 \"$TARGET_LOOP\""
+    run_cmd 3 "Setting permissions on backup loop device" "chmod 666 \"$BACKUP_LOOP\""
+  else
+    echo "Setting permissions on target loop device"
+    chmod 666 "$TARGET_LOOP"
+    echo "Setting permissions on backup loop device"
+    chmod 666 "$BACKUP_LOOP"
+  fi
+  
   # Create a file to pass loop device info to the container
   cat > "$output_conf" << EOF
 # Loop device configuration for BTRFS Subvolume Tools tests
@@ -136,21 +147,12 @@ Capability=all
 BindReadOnly=/dev/loop-control
 EOF
 
-  # Add bind mounts for available loop devices
+  # Bind all loop devices with read/write access
   for i in {0..9}; do
     if [ -e "/dev/loop$i" ]; then
-      echo "BindReadOnly=/dev/loop$i" >> "$config_file"
+      echo "Bind=/dev/loop$i" >> "$config_file"
     fi
   done
-
-  # Add specific binds for our attached loop devices
-  if [ -n "$TARGET_LOOP" ]; then
-    echo "Bind=$TARGET_LOOP" >> "$config_file"
-  fi
-  
-  if [ -n "$BACKUP_LOOP" ]; then
-    echo "Bind=$BACKUP_LOOP" >> "$config_file"
-  fi
 
   cat >> "$config_file" << EOF
 
