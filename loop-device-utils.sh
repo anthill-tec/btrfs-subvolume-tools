@@ -144,6 +144,157 @@ EOF
   return 0
 }
 
+# Apply loop device fixes for container
+apply_loop_device_fixes() {
+  local container_name="$1"
+  
+  # Log this operation if logging functions are available
+  if type log_phase >/dev/null 2>&1; then
+    log_phase 3 "Setting up loop devices for container use"
+  else
+    echo "Setting up loop devices for container use"
+  fi
+  
+  # 1. Make sure loop module is loaded
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Ensuring loop module is loaded" "modprobe loop"
+  else
+    echo "Ensuring loop module is loaded"
+    modprobe loop
+  fi
+  
+  # 2. Create loop device nodes directly on the host if they don't exist
+  for i in {0..10}; do
+    if [ ! -e "/dev/loop$i" ]; then
+      if type run_cmd >/dev/null 2>&1; then
+        run_cmd 3 "Creating loop device node /dev/loop$i" "mknod -m 660 /dev/loop$i b 7 $i || true"
+      else
+        echo "Creating loop device node /dev/loop$i"
+        mknod -m 660 /dev/loop$i b 7 $i || true
+      fi
+    fi
+  done
+  
+  # 3. Set permissions to make loop devices accessible
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Setting permissions on loop devices" "chmod 666 /dev/loop* || true"
+  else
+    echo "Setting permissions on loop devices"
+    chmod 666 /dev/loop* || true
+  fi
+  
+  # 4. Create images directory in container if needed
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Ensuring image directory exists" "mkdir -p /var/lib/machines/$container_name/images"
+  else
+    echo "Ensuring image directory exists"
+    mkdir -p "/var/lib/machines/$container_name/images"
+  fi
+  
+  # 5. Create loop devices inside the container 
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Creating loop devices in container" "mkdir -p /var/lib/machines/$container_name/dev"
+  else
+    echo "Creating loop devices in container"
+    mkdir -p "/var/lib/machines/$container_name/dev"
+  fi
+  
+  for i in {0..10}; do
+    if type run_cmd >/dev/null 2>&1; then
+      run_cmd 3 "Creating loop$i in container" "mknod -m 666 /var/lib/machines/$container_name/dev/loop$i b 7 $i || true"
+    else
+      echo "Creating loop$i in container"
+      mknod -m 666 "/var/lib/machines/$container_name/dev/loop$i" b 7 $i || true
+    fi
+  done
+  
+  # 6. Create a configuration file to help container scripts find loop devices
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Creating loop_devices.conf in container" "cat > /var/lib/machines/$container_name/loop_devices.conf << EOF
+# Loop device configuration for BTRFS Subvolume Tools tests
+# Generated: $(date)
+TARGET_LOOP=/dev/loop8
+BACKUP_LOOP=/dev/loop9
+EOF"
+  else
+    echo "Creating loop_devices.conf in container"
+    cat > "/var/lib/machines/$container_name/loop_devices.conf" << EOF
+# Loop device configuration for BTRFS Subvolume Tools tests
+# Generated: $(date)
+TARGET_LOOP=/dev/loop8
+BACKUP_LOOP=/dev/loop9
+EOF
+  fi
+  
+  # 7. Set up a better systemd-nspawn configuration
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Creating nspawn configuration" "cat > '/etc/systemd/nspawn/$container_name.nspawn' << EOF
+[Exec]
+Capability=CAP_SYS_ADMIN CAP_MKNOD CAP_SYS_MODULE
+
+[Files]
+BindReadOnly=/dev/loop-control
+Bind=/dev/loop0
+Bind=/dev/loop1
+Bind=/dev/loop2
+Bind=/dev/loop3
+Bind=/dev/loop4
+Bind=/dev/loop5
+Bind=/dev/loop6
+Bind=/dev/loop7
+Bind=/dev/loop8
+Bind=/dev/loop9
+Bind=/dev/loop10
+Bind=/dev/btrfs-control
+
+[DeviceAllow]
+# Allow loop devices
+Property=block-loop
+Value=rw
+
+# Allow btrfs control
+Property=char-misc
+Value=rw
+EOF"
+  else
+    echo "Creating nspawn configuration"
+    cat > "/etc/systemd/nspawn/$container_name.nspawn" << EOF
+[Exec]
+Capability=CAP_SYS_ADMIN CAP_MKNOD CAP_SYS_MODULE
+
+[Files]
+BindReadOnly=/dev/loop-control
+Bind=/dev/loop0
+Bind=/dev/loop1
+Bind=/dev/loop2
+Bind=/dev/loop3
+Bind=/dev/loop4
+Bind=/dev/loop5
+Bind=/dev/loop6
+Bind=/dev/loop7
+Bind=/dev/loop8
+Bind=/dev/loop9
+Bind=/dev/loop10
+Bind=/dev/btrfs-control
+
+[DeviceAllow]
+# Allow loop devices
+Property=block-loop
+Value=rw
+
+# Allow btrfs control
+Property=char-misc
+Value=rw
+EOF
+  fi
+  
+  if type log_phase >/dev/null 2>&1; then
+    log_phase 3 "Loop device setup complete"
+  else
+    echo "Loop device setup complete"
+  fi
+}
+
 # Create an enhanced container configuration for loop device access
 enhance_container_config() {
   local container_name="$1"
