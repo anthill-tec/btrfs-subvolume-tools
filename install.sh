@@ -250,8 +250,8 @@ run_tests() {
     # Create container using pacstrap
     log_phase 2 "Using pacstrap to create base container"
     
-    # Fixed command - removed the invalid -d option
-    run_cmd 2 "Installing base container with pacstrap" "pacstrap -c tests/container/rootfs base systemd bash btrfs-progs snapper"
+    # Fixed command - include util-linux to ensure losetup is available
+    run_cmd 2 "Installing base container with pacstrap" "pacstrap -c tests/container/rootfs base systemd bash btrfs-progs snapper util-linux"
     
     if [ $? -ne 0 ]; then
         log_phase 2 "Error: Pacstrap failed to create the container."
@@ -284,15 +284,15 @@ run_tests() {
     log_phase 2 "Copying test scripts"
     TEST_RUNNER_NAME=$(basename "$(find tests -name "test-runner.sh" | head -n 1)")
     find tests -name "test-*.sh" ! -name "$TEST_RUNNER_NAME" | while read script; do
-        # FIX 1: Fix quote issue - completely reformatted the command to avoid quotes inside quotes
+        # Fixed command to avoid quoting issues
         script_basename=$(basename "$script")
         run_cmd 2 "Copying: $script" "cp $script tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/$script_basename"
     done
     
     # Create test disk images
     log_phase 2 "Creating test disk images"
-    # Create images directory first - this fixes the missing directory issue
-    run_cmd 2 "Creating images directory" "mkdir -p tests/container/rootfs/images"
+    # Create images directory that matches the path expected by test scripts
+    run_cmd 2 "Creating images directory in container" "mkdir -p tests/container/rootfs/images"
     run_cmd 2 "Creating target disk image" "dd if=/dev/zero of=tests/container/rootfs/images/target-disk.img bs=1M count=500 status=none"
     run_cmd 2 "Creating backup disk image" "dd if=/dev/zero of=tests/container/rootfs/images/backup-disk.img bs=1M count=300 status=none"
     
@@ -330,12 +330,11 @@ run_tests() {
     run_cmd 3 "Copying test scripts to imported container" "cp -r tests/container/rootfs/root/* /var/lib/machines/$CONTAINER_NAME/root/"
     run_cmd 3 "Copying test images" "cp tests/container/rootfs/images/*.img /var/lib/machines/$CONTAINER_NAME/images/"
     
-    # Start the container
-    run_cmd 3 "Starting container" "machinectl start \"$CONTAINER_NAME\""
+    # Start the container with privileges for loop devices
+    run_cmd 3 "Starting container with device privileges" "systemd-nspawn -b -D /var/lib/machines/$CONTAINER_NAME --capability=all --property=DeviceAllow='block-loop rw' --machine=\"$CONTAINER_NAME\" --quiet &"
     if [ $? -ne 0 ]; then
-        log_phase 3 "Error: Failed to start container"
+        log_phase 3 "Error: Failed to start container with device privileges"
         run_cmd 3 "Checking errors in log" "journalctl -u systemd-machined -n 50"
-        run_cmd 3 "Checking systemd-nspawn logs" "journalctl -u systemd-nspawn@$CONTAINER_NAME.service -n 50"
         
         # Record end time and finalize logs
         TEST_END_TIME=$(date +%s)
@@ -350,7 +349,7 @@ run_tests() {
     log_phase 3 "Waiting for container to start..."
     CONTAINER_READY=false
     for i in {1..30}; do
-        # FIX 2: Improved container readiness detection
+        # Improved container readiness detection
         if machinectl status "$CONTAINER_NAME" 2>/dev/null | grep -q "Multi-User System"; then
             # Try to execute a simple command in the container to verify it's responsive
             if machinectl shell "$CONTAINER_NAME" /bin/true >/dev/null 2>&1; then
@@ -380,6 +379,13 @@ run_tests() {
         return 1
     fi
     
+    # Create the expected directory structure for images in the container
+    run_cmd 3 "Creating expected image structure in container" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'mkdir -p /images && ln -sf /var/lib/machines/$CONTAINER_NAME/images/* /images/'"
+    
+    # Set up loop devices in the container
+    run_cmd 3 "Loading loop module in container" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'modprobe loop || true'"
+    run_cmd 3 "Creating loop device nodes" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'for i in {0..9}; do mknod -m 660 /dev/loop\$i b 7 \$i 2>/dev/null || true; done'"
+    
     # Container is running, reinstall the proper cleanup trap
     log_phase 3 "Container is running, proceeding with tests..."
     trap cleanup EXIT
@@ -403,6 +409,10 @@ run_tests() {
     # List test scripts inside the container to verify they were copied correctly
     run_cmd 4 "Listing test scripts in container" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /root/test*.sh'"
     
+    # Verify the directory structure and loop devices
+    run_cmd 4 "Verifying image symlinks" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /images/'"
+    run_cmd 4 "Checking loop device availability" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /dev/loop* || echo \"No loop devices found\"'"
+    
     # Execute the test runner
     if [ "$DEBUG_MODE" = "true" ]; then
         # In debug mode, show output in real-time
@@ -416,9 +426,9 @@ run_tests() {
     # Check test output file
     run_cmd 4 "Checking test output" "cat \"$TEST_OUTPUT_FILE\" || echo 'No output found'"
     
-    # FIX 3: Check if tests actually ran or if there was an error finding test scripts
-    if grep -q "Error: No test scripts found" "$TEST_OUTPUT_FILE"; then
-        log_phase 4 "Test script error: No test scripts were found in the container"
+    # Check if tests reported failures
+    if grep -q "Some tests failed" "$TEST_OUTPUT_FILE"; then
+        log_phase 4 "Test script reported failures"
         TEST_RESULT=1
     fi
     
