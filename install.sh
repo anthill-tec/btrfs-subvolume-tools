@@ -142,7 +142,7 @@ copy_with_deps() {
     done
 }
 
-# Run tests using machinectl
+# Run tests using machinectl with pacstrap
 run_tests() {
     echo "Running tests with machinectl..."
     
@@ -213,69 +213,17 @@ run_tests() {
     # Phase 2: Tool setup
     log_phase 2 "Starting tool setup phase"
     
-    if [ ! -d tests/container/rootfs/bin ]; then
-        log_phase 2 "Setting up test container..."
+    # Check for pacstrap and install if missing
+    if ! command -v pacstrap >/dev/null 2>&1; then
+        log_phase 2 "Pacstrap not found. Attempting to install it..."
         
-        # Create proper OS root directory structure
-        run_cmd 2 "Creating proper OS root directory structure" "mkdir -p tests/container/rootfs/{bin,sbin,lib,lib64,usr/{bin,sbin,lib},etc,var,dev,sys,proc,run,tmp,root}"
-        run_cmd 2 "Setting tmp permissions" "chmod 1777 tests/container/rootfs/tmp"
-        
-        # Create base os-release file - important for container recognition
-        run_cmd 2 "Creating os-release file" "echo 'NAME=\"BTRFS Test Container\"' > tests/container/rootfs/etc/os-release && echo 'ID=btrfs-test' >> tests/container/rootfs/etc/os-release && echo 'VERSION_ID=\"1.0\"' >> tests/container/rootfs/etc/os-release"
-        
-        # Create machine-id file - also important for systemd
-        if command -v uuidgen &> /dev/null; then
-            run_cmd 2 "Creating machine-id using uuidgen" "uuidgen | tr -d '-' > tests/container/rootfs/etc/machine-id"
+        if command -v yay >/dev/null 2>&1; then
+            run_cmd 2 "Installing arch-install-scripts using yay" "yay -S --noconfirm arch-install-scripts"
+        elif command -v pacman >/dev/null 2>&1; then
+            run_cmd 2 "Installing arch-install-scripts using pacman" "pacman -S --noconfirm arch-install-scripts"
         else
-            run_cmd 2 "Creating machine-id using date+sha256" "echo \"$(date +%s%N | sha256sum | head -c 32)\" > tests/container/rootfs/etc/machine-id"
-        fi
-        
-        # Setup basic devices and directories needed for container
-        run_cmd 2 "Setting up basic devices" "mkdir -p tests/container/rootfs/dev/{pts,shm,mqueue}"
-        run_cmd 2 "Creating null device" "mknod -m 666 tests/container/rootfs/dev/null c 1 3 || true"
-        run_cmd 2 "Creating zero device" "mknod -m 666 tests/container/rootfs/dev/zero c 1 5 || true"
-        run_cmd 2 "Creating random device" "mknod -m 666 tests/container/rootfs/dev/random c 1 8 || true"
-        run_cmd 2 "Creating urandom device" "mknod -m 666 tests/container/rootfs/dev/urandom c 1 9 || true"
-        
-        # Check for pacstrap and install if missing
-        if ! command -v pacstrap >/dev/null 2>&1; then
-            log_phase 2 "Pacstrap not found. Attempting to install it..."
-            
-            if command -v yay >/dev/null 2>&1; then
-                run_cmd 2 "Installing arch-install-scripts using yay" "yay -S --noconfirm arch-install-scripts"
-            elif command -v pacman >/dev/null 2>&1; then
-                run_cmd 2 "Installing arch-install-scripts using pacman" "pacman -S --noconfirm arch-install-scripts"
-            else
-                log_phase 2 "Warning: Could not install pacstrap. Falling back to manual container setup."
-            fi
-        fi
-        
-        if command -v pacstrap >/dev/null 2>&1; then
-            # Fixed pacstrap command - removed the invalid -d option
-            run_cmd 2 "Creating minimal Arch container using pacstrap" "pacstrap -c tests/container/rootfs base systemd bash btrfs-progs snapper"
-        elif [ -f /etc/arch-release ] && command -v pacman >/dev/null 2>&1; then
-            log_phase 2 "Creating minimal container environment manually"
-            
-            # Copy required executables and libraries
-            log_phase 2 "Copying required executables and libraries"
-            for pkg in coreutils bash util-linux systemd btrfs-progs snapper; do
-                run_cmd 2 "Processing $pkg package" "pacman -Ql $pkg 2>/dev/null | grep -v '/$' | grep -E '/(s?bin|lib)/' | wc -l"
-                pacman -Ql $pkg 2>/dev/null | grep -v '/$' | grep -E '/(s?bin|lib)/' | awk '{print $2}' | while read file; do
-                    if [ -f "$file" ] && [ -x "$file" ]; then
-                        run_cmd 2 "Copying $file and dependencies" "copy_with_deps \"$file\" \"tests/container/rootfs\""
-                    fi
-                done
-            done
-            
-            # Create essential files
-            run_cmd 2 "Creating passwd file" "echo \"root:x:0:0:root:/root:/bin/bash\" > tests/container/rootfs/etc/passwd"
-            run_cmd 2 "Creating group file" "echo \"root:x:0:\" > tests/container/rootfs/etc/group"
-            
-            # Create minimal snapper config directory
-            run_cmd 2 "Creating snapper config directory" "mkdir -p tests/container/rootfs/etc/snapper/configs"
-        else
-            log_phase 2 "Error: This script requires Arch Linux with either pacstrap or pacman for container creation."
-            log_phase 2 "Please install Arch Linux or modify this script for your distribution."
+            log_phase 2 "Error: Could not install pacstrap. Neither yay nor pacman found."
+            log_phase 2 "Please install arch-install-scripts package manually and try again."
             
             # Record end time and finalize logs
             TEST_END_TIME=$(date +%s)
@@ -284,16 +232,50 @@ run_tests() {
             
             return 1
         fi
-    else
-        log_phase 2 "Using existing container..."
     fi
+    
+    # Verify pacstrap is now available
+    if ! command -v pacstrap >/dev/null 2>&1; then
+        log_phase 2 "Error: Could not find or install pacstrap."
+        log_phase 2 "Please install arch-install-scripts package manually and try again."
+        
+        # Record end time and finalize logs
+        TEST_END_TIME=$(date +%s)
+        TEST_DURATION=$((TEST_END_TIME - TEST_START_TIME))
+        finalize_logs 1 "$TEST_DURATION"
+        
+        return 1
+    fi
+    
+    # Create container using pacstrap
+    log_phase 2 "Using pacstrap to create base container"
+    
+    # Fixed command - removed the invalid -d option
+    run_cmd 2 "Installing base container with pacstrap" "pacstrap -c tests/container/rootfs base systemd bash btrfs-progs snapper"
+    
+    if [ $? -ne 0 ]; then
+        log_phase 2 "Error: Pacstrap failed to create the container."
+        log_phase 2 "Please check the logs for details."
+        
+        # Record end time and finalize logs
+        TEST_END_TIME=$(date +%s)
+        TEST_DURATION=$((TEST_END_TIME - TEST_START_TIME))
+        finalize_logs 1 "$TEST_DURATION"
+        
+        return 1
+    fi
+    
+    # After pacstrap runs, add any missing elements
+    
+    # Create minimal snapper config directory
+    run_cmd 2 "Creating snapper config directory" "mkdir -p tests/container/rootfs/etc/snapper/configs"
     
     # Copy bin scripts to container
     run_cmd 2 "Copying bin scripts to container" "mkdir -p tests/container/rootfs/root/bin"
     run_cmd 2 "Copying scripts" "cp -rv bin/* tests/container/rootfs/root/bin/"
     
     # Prepare test scripts for container environment
-    run_cmd 2 "Preparing test scripts for container environment" "cat tests/test-runner.sh | sed 's|/bin/bash|/usr/bin/bash|g' > /tmp/test-runner.sh.tmp"
+    run_cmd 2 "Preparing test scripts for container environment" "cat tests/test-runner.sh | sed 's|/bin/bash|/bin/sh|g' > /tmp/test-runner.sh.tmp"
     
     # Copy the test-runner script
     run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
@@ -302,7 +284,7 @@ run_tests() {
     log_phase 2 "Copying test scripts"
     TEST_RUNNER_NAME=$(basename "$(find tests -name "test-runner.sh" | head -n 1)")
     find tests -name "test-*.sh" ! -name "$TEST_RUNNER_NAME" | while read script; do
-        # Fixed quote issue in the command
+        # Fix quote issue in the command - remove the extra quote at the end
         run_cmd 2 "Copying: $script" "cp \"$script\" tests/container/rootfs/root/ && chmod +x \"tests/container/rootfs/root/$(basename \"$script\")\""
     done
     
@@ -339,55 +321,27 @@ run_tests() {
     run_cmd 3 "Verifying container structure" "find tests/container/rootfs -type d | sort | head -n 20"
     run_cmd 3 "Checking container files" "find tests/container/rootfs -type f | grep -v 'img$' | sort | head -n 20"
     
-    # Ensure the imported container has proper OS root structure
-    # This is crucial - machinectl imports to /var/lib/machines/$CONTAINER_NAME
-    run_cmd 3 "Ensuring proper OS structure in imported container" "mkdir -p /var/lib/machines/$CONTAINER_NAME/etc"
-    run_cmd 3 "Creating os-release in imported location" "echo 'NAME=\"BTRFS Test Container\"' > /var/lib/machines/$CONTAINER_NAME/etc/os-release && echo 'ID=btrfs-test' >> /var/lib/machines/$CONTAINER_NAME/etc/os-release && echo 'VERSION_ID=\"1.0\"' >> /var/lib/machines/$CONTAINER_NAME/etc/os-release"
-    run_cmd 3 "Creating machine-id in imported location" "uuidgen | tr -d '-' > /var/lib/machines/$CONTAINER_NAME/etc/machine-id 2>/dev/null || echo \"$(date +%s%N | sha256sum | head -c 32)\" > /var/lib/machines/$CONTAINER_NAME/etc/machine-id"
+    # Verify shell binaries exist in the container
+    run_cmd 3 "Checking for shell in container" "ls -la tests/container/rootfs/bin/sh || ls -la tests/container/rootfs/usr/bin/sh"
     
-    # Copy important files to ensure proper container functionality
-    run_cmd 3 "Copying important files to imported container" "cp -r tests/container/rootfs/bin tests/container/rootfs/sbin tests/container/rootfs/lib* tests/container/rootfs/usr /var/lib/machines/$CONTAINER_NAME/ 2>/dev/null || true"
+    # Copy test files to imported container (needed because machinectl import-fs might not copy everything)
+    run_cmd 3 "Creating important directories in imported container" "mkdir -p /var/lib/machines/$CONTAINER_NAME/root /var/lib/machines/$CONTAINER_NAME/images"
+    run_cmd 3 "Copying test scripts to imported container" "cp -r tests/container/rootfs/root/* /var/lib/machines/$CONTAINER_NAME/root/"
+    run_cmd 3 "Copying test images" "cp tests/container/rootfs/images/*.img /var/lib/machines/$CONTAINER_NAME/images/"
     
     # Start the container
-    run_cmd 3 "Starting container $CONTAINER_NAME" "machinectl start \"$CONTAINER_NAME\""
+    run_cmd 3 "Starting container" "machinectl start \"$CONTAINER_NAME\""
     if [ $? -ne 0 ]; then
-        log_phase 3 "Error: Failed to start container with machinectl start"
-        run_cmd 3 "Capturing detailed startup failure logs" "machinectl status \"$CONTAINER_NAME\""
-        run_cmd 3 "Checking machined logs" "journalctl -u systemd-machined.service -n 50"
-        run_cmd 3 "Checking systemd-nspawn log output" "journalctl -u systemd-nspawn@$CONTAINER_NAME.service -n 50"
-        run_cmd 3 "Checking importctl list" "importctl list-images"
-        run_cmd 3 "Checking journal container messages" "journalctl -xb --grep=\"$CONTAINER_NAME\""
+        log_phase 3 "Error: Failed to start container"
+        run_cmd 3 "Checking errors in log" "journalctl -u systemd-machined -n 50"
+        run_cmd 3 "Checking systemd-nspawn logs" "journalctl -u systemd-nspawn@$CONTAINER_NAME.service -n 50"
         
-        # Try alternative approach if first method failed
-        run_cmd 3 "Trying alternative approaches to start the container" "machinectl enable \"$CONTAINER_NAME\" 2>/dev/null"
-        if [ $? -eq 0 ]; then
-            run_cmd 3 "Enabled container, trying to start again" "machinectl start \"$CONTAINER_NAME\""
-            if [ $? -ne 0 ]; then
-                log_phase 3 "Alternative approach also failed to start container"
-                run_cmd 3 "Checking final container status" "machinectl status \"$CONTAINER_NAME\""
-                
-                run_cmd 3 "Cleaning up failed container" "machinectl terminate \"$CONTAINER_NAME\" 2>/dev/null || true && machinectl remove \"$CONTAINER_NAME\" 2>/dev/null || true"
-                
-                # Record end time and finalize logs
-                TEST_END_TIME=$(date +%s)
-                TEST_DURATION=$((TEST_END_TIME - TEST_START_TIME))
-                finalize_logs 1 "$TEST_DURATION"
-                
-                return 1
-            fi
-        else
-            log_phase 3 "Failed to enable container"
-            run_cmd 3 "Checking container status" "machinectl status \"$CONTAINER_NAME\""
-            
-            run_cmd 3 "Cleaning up failed container" "machinectl terminate \"$CONTAINER_NAME\" 2>/dev/null || true && machinectl remove \"$CONTAINER_NAME\" 2>/dev/null || true"
-            
-            # Record end time and finalize logs
-            TEST_END_TIME=$(date +%s)
-            TEST_DURATION=$((TEST_END_TIME - TEST_START_TIME))
-            finalize_logs 1 "$TEST_DURATION"
-            
-            return 1
-        fi
+        # Record end time and finalize logs
+        TEST_END_TIME=$(date +%s)
+        TEST_DURATION=$((TEST_END_TIME - TEST_START_TIME))
+        finalize_logs 1 "$TEST_DURATION"
+        
+        return 1
     fi
     
     # Wait for container to be fully running - disable trap during waiting
@@ -408,7 +362,7 @@ run_tests() {
     if [ "$CONTAINER_READY" != "true" ]; then
         log_phase 3 "Error: Container failed to start properly. Check system logs."
         run_cmd 3 "Checking systemd-machined logs" "journalctl -u systemd-machined.service -n 100"
-        run_cmd 3 "Final container status" "machinectl status \"$CONTAINER_NAME\""
+        run_cmd 3 "Final container status" "machinectl status \"$CONTAINER_NAME\" || true"
         
         run_cmd 3 "Cleaning up failed container" "machinectl terminate \"$CONTAINER_NAME\" 2>/dev/null || true && machinectl remove \"$CONTAINER_NAME\" 2>/dev/null || true"
         
@@ -435,30 +389,35 @@ run_tests() {
     # Run tests in the container
     log_phase 4 "Running tests in container $CONTAINER_NAME"
     
-    # Execute the test runner and capture its output in a way that will definitely work
-    # Use script command to capture ALL output including control characters
+    # Get container info for better debugging
+    run_cmd 4 "Getting container status" "machinectl status \"$CONTAINER_NAME\""
+    
+    # Check shell availability in the container
+    run_cmd 4 "Checking shell in container" "machinectl shell \"$CONTAINER_NAME\" ls -la /bin/sh || machinectl shell \"$CONTAINER_NAME\" ls -la /usr/bin/sh"
+    
+    # Determine the shell path in the container
+    SHELL_PATH="/bin/sh"
+    if ! machinectl shell "$CONTAINER_NAME" test -f "/bin/sh" >/dev/null 2>&1; then
+        if machinectl shell "$CONTAINER_NAME" test -f "/usr/bin/sh" >/dev/null 2>&1; then
+            SHELL_PATH="/usr/bin/sh"
+        fi
+    fi
+    
+    # Execute the test runner
     if [ "$DEBUG_MODE" = "true" ]; then
         # In debug mode, show output in real-time
-        run_cmd 4 "Running test-runner.sh in container" "script -q -c \"machinectl shell $CONTAINER_NAME /usr/bin/bash -c 'cd /root && PROJECT_NAME=\\\"${PROJECT_NAME:-BTRFS Subvolume Tools}\\\" exec /usr/bin/bash ./test-runner.sh'\" /dev/null | tee \"$TEST_OUTPUT_FILE\""
+        run_cmd 4 "Running test-runner.sh in container with $SHELL_PATH" "machinectl shell \"$CONTAINER_NAME\" $SHELL_PATH -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" $SHELL_PATH ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
     else
         # In normal mode, capture output to file only
-        run_cmd 4 "Running test-runner.sh in container" "script -q -c \"machinectl shell $CONTAINER_NAME /usr/bin/bash -c 'cd /root && PROJECT_NAME=\\\"${PROJECT_NAME:-BTRFS Subvolume Tools}\\\" exec /usr/bin/bash ./test-runner.sh'\" /dev/null > \"$TEST_OUTPUT_FILE\""
+        run_cmd 4 "Running test-runner.sh in container with $SHELL_PATH" "machinectl shell \"$CONTAINER_NAME\" $SHELL_PATH -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" $SHELL_PATH ./test-runner.sh' > \"$TEST_OUTPUT_FILE\" 2>&1"
     fi
     TEST_RESULT=$?
     
-    # Log the test result - in normal mode, just show summary info
-    if [ "$DEBUG_MODE" != "true" ]; then
-        log_phase 4 "Test execution complete with result: $TEST_RESULT"
-        run_cmd 4 "Test summary" "head -n 10 \"$TEST_OUTPUT_FILE\""
-    else
-        log_phase 4 "Full test output (debug mode): $TEST_RESULT"
-    fi
+    # Check test output file
+    run_cmd 4 "Checking test output" "cat \"$TEST_OUTPUT_FILE\" || echo 'No output found'"
     
     # Phase 5: Cleanup and results
     log_phase 5 "Starting cleanup and results phase"
-    
-    # Capture container logs for debugging
-    run_cmd 5 "Capturing container journal" "journalctl -M \"$CONTAINER_NAME\""
     
     # Record end time
     TEST_END_TIME=$(date +%s)
