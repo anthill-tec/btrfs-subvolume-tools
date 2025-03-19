@@ -1,5 +1,5 @@
 #!/bin/bash
-# BTRFS Subvolume Tools Test Runner
+# Project Test Runner
 # Using bash as the baseline for more powerful functionality
 
 # Color output
@@ -10,7 +10,7 @@ BLUE="\033[0;34m"
 NC="\033[0m" # No Color
 
 # Default project name if not provided
-PROJECT_NAME="${PROJECT_NAME:-BTRFS Subvolume Tools}"
+PROJECT_NAME="${PROJECT_NAME:-Project}"
 
 # Test directory - automatically find the script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
