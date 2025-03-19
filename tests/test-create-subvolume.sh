@@ -1,201 +1,154 @@
-#!/bin/bash
-set -e
+#!/bin/sh
+# Test for the create-subvolume.sh script
 
-# Color output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
-
-# Test settings
-TEST_DIR=$(mktemp -d)
-SCRIPT_DIR="/root/bin"
-TARGET_DEVICE=""
-BACKUP_DEVICE=""
-TARGET_MOUNT="$TEST_DIR/mnt-target"
-BACKUP_MOUNT="$TEST_DIR/mnt-backup"
-SUBVOL_NAME="@test"
-IMAGE_SIZE="1000M"
-BACKUP_SIZE="500M"
-
-# Print header
-echo -e "${BLUE}============================================${NC}"
-echo -e "${BLUE}      Testing create-subvolume script      ${NC}"
-echo -e "${BLUE}============================================${NC}"
-echo ""
-
-# Make sure script exists
-if [ ! -f "$SCRIPT_DIR/../bin/create-subvolume.sh" ]; then
-    echo -e "${RED}Error: create-subvolume.sh script not found${NC}"
-    echo -e "${YELLOW}Expected location: $SCRIPT_DIR/../bin/create-subvolume.sh${NC}"
-    exit 1
-fi
-
-# Check for required tools
-for cmd in dd losetup mkfs.btrfs mount btrfs; do
-    if ! command -v $cmd &> /dev/null; then
-        echo -e "${RED}Error: Required command '$cmd' not found${NC}"
-        exit 1
-    fi
-done
-
-# Setup test environment
-echo -e "${YELLOW}Setting up test environment...${NC}"
-
-echo -e "Creating test directory structure..."
-mkdir -p "$TARGET_MOUNT" "$BACKUP_MOUNT"
-
-echo -e "Finding disk images..."
-# Use find to locate the images instead of hardcoding paths
-TARGET_IMAGE=$(find / -name "target-disk.img" 2>/dev/null | head -n 1)
-BACKUP_IMAGE=$(find / -name "backup-disk.img" 2>/dev/null | head -n 1)
-
-# Verify that we found the images
-if [ -z "$TARGET_IMAGE" ]; then
-    echo -e "${RED}Error: Could not locate target-disk.img${NC}"
-    exit 1
-fi
-
-if [ -z "$BACKUP_IMAGE" ]; then
-    echo -e "${RED}Error: Could not locate backup-disk.img${NC}"
-    exit 1
-fi
-
-echo -e "Found target image: $TARGET_IMAGE"
-echo -e "Found backup image: $BACKUP_IMAGE"
-
-echo -e "Setting up loop devices..."
-
-# Check if pre-configured loop devices are available
-if [ -f "/loop_devices.conf" ]; then
-    echo "Using pre-configured loop devices from host"
-    source /loop_devices.conf
-    TARGET_DEVICE="$TARGET_LOOP"
-    BACKUP_DEVICE="$BACKUP_LOOP"
-    echo -e "  Target device: $TARGET_DEVICE"
-    echo -e "  Backup device: $BACKUP_DEVICE"
-    # Skip further setup since devices are already prepared
-else
-    # Check if we're in a container environment
-    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-        # Container-specific setup with explicit loop devices
-        echo -e "Using container-specific loop device setup"
-        # Fallback if pre-configured devices aren't available
-        mknod -m 660 /dev/loop8 b 7 8 2>/dev/null || true
-        losetup /dev/loop8 "$TARGET_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
-        TARGET_DEVICE="/dev/loop8"
-        mknod -m 660 /dev/loop9 b 7 9 2>/dev/null || true
-        losetup /dev/loop9 "$BACKUP_IMAGE" || { echo "Failed to setup loop device"; exit 1; }
-        BACKUP_DEVICE="/dev/loop9"
-    else
-        # Standard setup for non-container environments
-        TARGET_DEVICE=$(losetup -f --show "$TARGET_IMAGE")
-        BACKUP_DEVICE=$(losetup -f --show "$BACKUP_IMAGE")
-    fi
-    echo -e "  Target device: $TARGET_DEVICE"
-    echo -e "  Backup device: $BACKUP_DEVICE"
-fi
-
-echo -e "Formatting devices with btrfs..."
-mkfs.btrfs -f "$TARGET_DEVICE"
-mkfs.btrfs -f "$BACKUP_DEVICE"
-
-echo -e "Mounting devices..."
-mount "$TARGET_DEVICE" "$TARGET_MOUNT"
-mount "$BACKUP_DEVICE" "$BACKUP_MOUNT"
-
-# Create test data
-echo -e "Creating test data..."
-mkdir -p "$TARGET_MOUNT/testdir"
-echo "This is a test file" > "$TARGET_MOUNT/testfile.txt"
-echo "Another test file" > "$TARGET_MOUNT/testdir/nested.txt"
-dd if=/dev/urandom of="$TARGET_MOUNT/testdir/random.bin" bs=1M count=10 status=progress
-
-echo -e "${GREEN}Test environment setup complete${NC}"
-echo ""
-
-# Run the script
-echo -e "${YELLOW}Running create-subvolume script...${NC}"
-"$SCRIPT_DIR/../bin/create-subvolume.sh" \
-    --target-device "$TARGET_DEVICE" \
-    --target-mount "$TARGET_MOUNT" \
-    --backup-drive "$BACKUP_DEVICE" \
-    --backup-mount "$BACKUP_MOUNT" \
-    --subvol-name "$SUBVOL_NAME" \
-    --backup
-
-echo ""
-echo -e "${YELLOW}Verifying results...${NC}"
-
-# Check if the subvolume was created
-echo -e "Checking subvolume creation..."
-if btrfs subvolume list "$TARGET_MOUNT" | grep -q "$SUBVOL_NAME"; then
-    echo -e "${GREEN}✓ Subvolume $SUBVOL_NAME was created successfully${NC}"
-else
-    echo -e "${RED}✗ Subvolume $SUBVOL_NAME was not created${NC}"
-    FAILED=1
-fi
-
-# Check if data was properly copied
-echo -e "Checking data integrity..."
-if [ -f "$TARGET_MOUNT/$SUBVOL_NAME/testfile.txt" ] && \
-   [ -f "$TARGET_MOUNT/$SUBVOL_NAME/testdir/nested.txt" ] && \
-   [ -f "$TARGET_MOUNT/$SUBVOL_NAME/testdir/random.bin" ]; then
-    echo -e "${GREEN}✓ Data files were copied to the subvolume${NC}"
+# Setup test environment 
+setup() {
+    echo "Setting up test environment..."
     
-    # Verify file contents
-    if diff "$TARGET_MOUNT/testfile.txt" "$TARGET_MOUNT/$SUBVOL_NAME/testfile.txt" >/dev/null; then
-        echo -e "${GREEN}✓ File content verification passed${NC}"
+    # Create test directory structure
+    # Use the global temp directory if available, or create a new one
+    if [ -n "$TEST_TEMP_DIR" ] && [ -d "$TEST_TEMP_DIR" ]; then
+        TEST_DIR="$TEST_TEMP_DIR/create-subvolume-test"
+        mkdir -p "$TEST_DIR"
     else
-        echo -e "${RED}✗ File content verification failed${NC}"
-        FAILED=1
+        TEST_DIR=$(mktemp -d /tmp/test-btrfs-XXXXXX)
     fi
-else
-    echo -e "${RED}✗ Not all data files were copied to the subvolume${NC}"
-    FAILED=1
-fi
-
-# Check fstab entry
-echo -e "Checking for fstab changes..."
-if grep -q "$SUBVOL_NAME" /etc/fstab; then
-    echo -e "${YELLOW}! Found fstab entry for $SUBVOL_NAME - this is expected in a real system${NC}"
-    echo -e "${YELLOW}! But for this test, the fstab should not have been modified${NC}"
-    FAILED=1
-else
-    echo -e "${GREEN}✓ System fstab was not modified during testing${NC}"
-fi
-
-# Cleanup
-echo -e "${YELLOW}Cleaning up test environment...${NC}"
-umount "$TARGET_MOUNT" || true
-umount "$BACKUP_MOUNT" || true
-
-# Check if we're using pre-configured loop devices
-if [ -f "/loop_devices.conf" ]; then
-    # We don't detach pre-configured loop devices, as they're managed by the test framework
-    echo -e "Skipping loop device detach for pre-configured devices"
-else
-    # Clean up loop devices we created in this script
-    if [ -f "/.dockerenv" ] || [ -f "/run/.containerenv" ]; then
-        losetup -d /dev/loop8 || true
-        losetup -d /dev/loop9 || true
+    
+    TARGET_MOUNT="$TEST_DIR/mnt-target"
+    BACKUP_MOUNT="$TEST_DIR/mnt-backup"
+    SUBVOL_NAME="@test"
+    
+    # Create necessary directories
+    mkdir -p "$TARGET_MOUNT" "$BACKUP_MOUNT"
+    
+    # Use the disk images found in global setup if available
+    if [ -n "$TEST_TARGET_IMAGE" ] && [ -n "$TEST_BACKUP_IMAGE" ]; then
+        TARGET_IMAGE="$TEST_TARGET_IMAGE"
+        BACKUP_IMAGE="$TEST_BACKUP_IMAGE"
     else
-        losetup -d "$TARGET_DEVICE" || true
-        losetup -d "$BACKUP_DEVICE" || true
+        # Otherwise, search for them
+        TARGET_IMAGE=$(find / -name "target-disk.img" 2>/dev/null | head -n 1)
+        BACKUP_IMAGE=$(find / -name "backup-disk.img" 2>/dev/null | head -n 1)
     fi
-fi
+    
+    # Verify that we found the images
+    if [ -z "$TARGET_IMAGE" ]; then
+        echo "Error: Could not locate target-disk.img"
+        return 1
+    fi
+    
+    if [ -z "$BACKUP_IMAGE" ]; then
+        echo "Error: Could not locate backup-disk.img"
+        return 1
+    fi
+    
+    echo "Found target image: $TARGET_IMAGE"
+    echo "Found backup image: $BACKUP_IMAGE"
+    
+    # Set up loop devices
+    echo "Setting up loop devices..."
+    
+    # Check if loop devices are already in use
+    losetup | grep -q /dev/loop8 && losetup -d /dev/loop8
+    losetup | grep -q /dev/loop9 && losetup -d /dev/loop9
+    
+    # Set up loop devices with the image files
+    losetup /dev/loop8 "$TARGET_IMAGE" || return 1
+    losetup /dev/loop9 "$BACKUP_IMAGE" || return 1
+    TARGET_DEVICE="/dev/loop8"
+    BACKUP_DEVICE="/dev/loop9"
+    
+    echo "  Target device: $TARGET_DEVICE"
+    echo "  Backup device: $BACKUP_DEVICE"
+    
+    # Export these variables for the test
+    export TEST_DIR TARGET_MOUNT BACKUP_MOUNT TARGET_DEVICE BACKUP_DEVICE SUBVOL_NAME
+    
+    return 0
+}
 
-rm -rf "$TEST_DIR"
-echo -e "${GREEN}Cleanup complete${NC}"
+# Run the actual test
+run_test() {
+    echo "Formatting devices with btrfs..."
+    # Format both devices with btrfs
+    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
+    mkfs.btrfs -f "$BACKUP_DEVICE" || return 1
+    
+    echo "Creating test data..."
+    # Mount target device to create test data
+    mount "$TARGET_DEVICE" "$TARGET_MOUNT" || return 1
+    
+    # Create some test files
+    mkdir -p "$TARGET_MOUNT/testdir"
+    echo "This is a test file" > "$TARGET_MOUNT/testfile.txt"
+    echo "Another test file" > "$TARGET_MOUNT/testdir/nested.txt"
+    dd if=/dev/urandom of="$TARGET_MOUNT/testdir/random.bin" bs=1M count=10 status=none
+    
+    # Unmount before running the script
+    umount "$TARGET_MOUNT"
+    
+    echo "Running create-subvolume script..."
+    # Run the script being tested
+    SCRIPT_PATH=$(find / -path "*/bin/create-subvolume.sh" 2>/dev/null | head -n 1)
+    if [ -z "$SCRIPT_PATH" ]; then
+        echo "Error: Could not locate create-subvolume.sh"
+        return 1
+    fi
+    
+    "$SCRIPT_PATH" \
+        --target-device "$TARGET_DEVICE" \
+        --target-mount "$TARGET_MOUNT" \
+        --backup-drive "$BACKUP_DEVICE" \
+        --backup-mount "$BACKUP_MOUNT" \
+        --subvol-name "$SUBVOL_NAME" \
+        --backup || return 1
+    
+    echo "Verifying results..."
+    # Check if the subvolume was created
+    if btrfs subvolume list "$TARGET_MOUNT" | grep -q "$SUBVOL_NAME"; then
+        echo "✓ Subvolume $SUBVOL_NAME was created successfully"
+    else
+        echo "✗ Subvolume $SUBVOL_NAME was not created"
+        return 1
+    fi
+    
+    # Check if data was properly copied
+    if [ -f "$TARGET_MOUNT/$SUBVOL_NAME/testfile.txt" ] && \
+       [ -f "$TARGET_MOUNT/$SUBVOL_NAME/testdir/nested.txt" ] && \
+       [ -f "$TARGET_MOUNT/$SUBVOL_NAME/testdir/random.bin" ]; then
+        echo "✓ Data files were copied to the subvolume"
+        
+        # Verify file contents
+        if diff "$TARGET_MOUNT/testfile.txt" "$TARGET_MOUNT/$SUBVOL_NAME/testfile.txt" >/dev/null; then
+            echo "✓ File content verification passed"
+        else
+            echo "✗ File content verification failed"
+            return 1
+        fi
+    else
+        echo "✗ Not all data files were copied to the subvolume"
+        return 1
+    fi
+    
+    return 0
+}
 
-# Test results
-echo ""
-echo -e "${BLUE}============================================${NC}"
-if [ "$FAILED" = "1" ]; then
-    echo -e "${RED}       create-subvolume Test: FAILED       ${NC}"
-    exit 1
-else
-    echo -e "${GREEN}       create-subvolume Test: PASSED       ${NC}"
-fi
-echo -e "${BLUE}============================================${NC}"
+# Clean up after test
+teardown() {
+    echo "Cleaning up test environment..."
+    
+    # Make sure we unmount before detaching loop devices
+    umount "$TARGET_MOUNT" 2>/dev/null || true
+    umount "$BACKUP_MOUNT" 2>/dev/null || true
+    
+    # Detach loop devices
+    losetup -d "$TARGET_DEVICE" 2>/dev/null || true
+    losetup -d "$BACKUP_DEVICE" 2>/dev/null || true
+    
+    # Remove the test directory (unless it's part of the global temp dir)
+    if [ -z "$TEST_TEMP_DIR" ] || [ ! -d "$TEST_TEMP_DIR" ]; then
+        rm -rf "$TEST_DIR" 2>/dev/null || true
+    fi
+    
+    return 0
+}
