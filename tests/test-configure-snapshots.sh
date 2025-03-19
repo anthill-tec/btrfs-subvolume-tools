@@ -1,152 +1,267 @@
-#!/bin/sh
+#!/bin/bash
 # Test for the configure-snapshots.sh script
+# Updated to use test_* functions approach and leverage global hooks
+
+# Global test variables
+TEST_DIR=""
+TARGET_MOUNT=""
+TARGET_DEVICE=""
+SCRIPT_PATH=""
 
 # Setup test environment
 setup() {
     echo "Setting up test environment..."
     
-    # Create test directory
-    # Use the global temp directory if available, or create a new one
-    if [ -n "$TEST_TEMP_DIR" ] && [ -d "$TEST_TEMP_DIR" ]; then
-        TEST_DIR="$TEST_TEMP_DIR/configure-snapshots-test"
-        mkdir -p "$TEST_DIR"
-    else
-        TEST_DIR=$(mktemp -d /tmp/test-btrfs-XXXXXX)
-    fi
+    # Use the global temp directory provided by setup_all.sh
+    TEST_DIR="$TEST_TEMP_DIR/configure-snapshots-test"
+    mkdir -p "$TEST_DIR"
     
     TARGET_MOUNT="$TEST_DIR/mnt-target"
-    SUBVOL_NAME="@test"
-    CONFIG_NAME="test"
-    ALLOW_USERS="testuser"
-    
-    # Create necessary directories
     mkdir -p "$TARGET_MOUNT"
     
-    # Use the disk images found in global setup if available
-    if [ -n "$TEST_TARGET_IMAGE" ]; then
-        TARGET_IMAGE="$TEST_TARGET_IMAGE"
-    else
-        # Otherwise, search for it
-        TARGET_IMAGE=$(find / -name "target-disk.img" 2>/dev/null | head -n 1)
-    fi
+    # Use the loop device already set up by setup_all.sh
+    TARGET_DEVICE="/dev/loop8"  # Using the standard loop device from setup_all.sh
     
-    # Verify that we found the image
-    if [ -z "$TARGET_IMAGE" ]; then
-        echo "Error: Could not locate target-disk.img"
-        return 1
-    fi
+    echo "Target device: $TARGET_DEVICE"
     
-    echo "Found target image: $TARGET_IMAGE"
-    
-    # Set up loop devices
-    echo "Setting up loop device..."
-    
-    # Ensure loop8 is not already in use
-    losetup | grep -q /dev/loop8 && losetup -d /dev/loop8
-    
-    # Set up loop device with the image file
-    losetup /dev/loop8 "$TARGET_IMAGE" || return 1
-    TARGET_DEVICE="/dev/loop8"
-    
-    echo "  Target device: $TARGET_DEVICE"
-    
-    # Export variables for the test
-    export TEST_DIR TARGET_MOUNT TARGET_DEVICE SUBVOL_NAME CONFIG_NAME ALLOW_USERS
-    
-    return 0
-}
-
-# Run the actual test
-run_test() {
-    echo "Formatting device with btrfs..."
-    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
-    
-    echo "Mounting device..."
-    mount "$TARGET_DEVICE" "$TARGET_MOUNT" || return 1
-    
-    echo "Creating test subvolume..."
-    # Create a subvolume first using the btrfs command directly
-    btrfs subvolume create "$TARGET_MOUNT/$SUBVOL_NAME" || return 1
-    
-    echo "Running configure-snapshots script..."
-    # Find the script
+    # Find the script path
     SCRIPT_PATH=$(find / -path "*/bin/configure-snapshots.sh" 2>/dev/null | head -n 1)
     if [ -z "$SCRIPT_PATH" ]; then
         echo "Error: Could not locate configure-snapshots.sh"
         return 1
     fi
     
-    # Run the script being tested
-    "$SCRIPT_PATH" \
-        --target-mount "$TARGET_MOUNT" \
-        --config-name "$CONFIG_NAME" \
-        --allow-users "$ALLOW_USERS" \
-        --force || return 1
+    echo "Found script: $SCRIPT_PATH"
     
-    echo "Verifying results..."
-    # Check if snapper configuration was created
-    if [ -f "/etc/snapper/configs/$CONFIG_NAME" ]; then
-        echo "✓ Snapper configuration for $CONFIG_NAME was created"
-    else
-        echo "✗ Snapper configuration for $CONFIG_NAME was not created"
-        return 1
-    fi
-    
-    # Check if users were properly set
-    if grep -q "ALLOW_USERS=\"$ALLOW_USERS\"" "/etc/snapper/configs/$CONFIG_NAME" 2>/dev/null; then
-        echo "✓ User permissions were set correctly"
-    else
-        echo "✗ User permissions were not set correctly"
-        return 1
-    fi
-    
-    # Check if timeline is enabled
-    if grep -q "TIMELINE_CREATE=\"yes\"" "/etc/snapper/configs/$CONFIG_NAME" 2>/dev/null; then
-        echo "✓ Timeline creation is enabled"
-    else
-        echo "✗ Timeline creation was not configured properly"
-        return 1
-    fi
-    
-    # Check if we can create a snapshot
-    if snapper -c "$CONFIG_NAME" create -d "Test snapshot" >/dev/null 2>&1; then
-        echo "✓ Successfully created a test snapshot"
-        
-        # Check if we can list snapshots
-        if snapper -c "$CONFIG_NAME" list | grep -q "Test snapshot"; then
-            echo "✓ Successfully listed snapshots"
-        else
-            echo "✗ Could not list snapshots"
-            return 1
-        fi
-    else
-        echo "✗ Failed to create a test snapshot"
-        return 1
-    fi
+    # Format device with btrfs
+    echo "Formatting device with btrfs..."
+    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
     
     return 0
 }
 
-# Clean up after test
+# Create a btrfs subvolume for testing
+prepare_subvolume() {
+    local subvol_name="$1"
+    
+    echo "Creating test subvolume..."
+    
+    # Mount target device
+    mount "$TARGET_DEVICE" "$TARGET_MOUNT" || return 1
+    
+    # Create the subvolume
+    btrfs subvolume create "$TARGET_MOUNT/$subvol_name" || {
+        umount "$TARGET_MOUNT"
+        return 1
+    }
+    
+    # Create some test files and directories in the subvolume
+    mkdir -p "$TARGET_MOUNT/$subvol_name/test-dir"
+    echo "Test file in subvolume" > "$TARGET_MOUNT/$subvol_name/test-file.txt"
+    
+    echo "✓ Test subvolume $subvol_name created successfully"
+    return 0
+}
+
+# Clean up after test - simplified because global teardown handles most cleanup
 teardown() {
     echo "Cleaning up test environment..."
     
-    # Remove snapper config
-    if [ -f "/etc/snapper/configs/$CONFIG_NAME" ]; then
-        echo "Removing test snapper configuration..."
-        snapper -c "$CONFIG_NAME" delete-config 2>/dev/null || true
+    # Try to remove any snapper configurations we created
+    for config in test home var custom; do
+        snapper -c "$config" delete-config 2>/dev/null || true
+    done
+    
+    # Unmount any filesystems we might have mounted
+    mount | grep "$TEST_DIR" | awk '{print $3}' | while read mount_point; do
+        umount "$mount_point" 2>/dev/null || true
+    done
+    
+    # Remove any test-specific directories
+    rm -rf "$TEST_DIR" 2>/dev/null || true
+    
+    # Note: The global teardown_all handles loop device cleanup
+    return 0
+}
+
+# Test with default configuration
+test_default_config() {
+    echo "Running test: Default configuration"
+    
+    # Create a test subvolume
+    prepare_subvolume "@home" || return 1
+    
+    # Run the script with default configuration
+    "$SCRIPT_PATH" \
+        --target-mount "$TARGET_MOUNT/@home" \
+        --config-name "test" \
+        --force || {
+        umount "$TARGET_MOUNT"
+        return 1
+    }
+    
+    # Verify snapper configuration was created
+    if [ ! -f "/etc/snapper/configs/test" ]; then
+        echo "✗ Snapper configuration for 'test' was not created"
+        umount "$TARGET_MOUNT"
+        return 1
     fi
+    echo "✓ Snapper configuration was created successfully"
     
-    # Unmount before detaching loop device
-    umount "$TARGET_MOUNT" 2>/dev/null || true
-    
-    # Detach loop device
-    losetup -d "$TARGET_DEVICE" 2>/dev/null || true
-    
-    # Remove the test directory (unless it's part of the global temp dir)
-    if [ -z "$TEST_TEMP_DIR" ] || [ ! -d "$TEST_TEMP_DIR" ]; then
-        rm -rf "$TEST_DIR" 2>/dev/null || true
+    # Check timeline settings (default is "yes")
+    if ! grep -q "TIMELINE_CREATE=\"yes\"" "/etc/snapper/configs/test"; then
+        echo "✗ Timeline creation not properly configured"
+        umount "$TARGET_MOUNT"
+        return 1
     fi
+    echo "✓ Timeline settings properly configured"
     
+    # Test creating a snapshot
+    if ! snapper -c "test" create -d "Test snapshot"; then
+        echo "✗ Failed to create a test snapshot"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ Successfully created a test snapshot"
+    
+    # Verify snapshot exists
+    if ! snapper -c "test" list | grep -q "Test snapshot"; then
+        echo "✗ Could not find created snapshot"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ Successfully verified snapshot creation"
+    
+    # Clean up
+    umount "$TARGET_MOUNT"
+    return 0
+}
+
+# Test with user permissions
+test_with_user_permissions() {
+    echo "Running test: User permissions configuration"
+    
+    # Reset filesystem and prepare new subvolume
+    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
+    prepare_subvolume "@home" || return 1
+    
+    # Test users to allow
+    local test_users="testuser1,testuser2"
+    
+    # Run the script with user permissions
+    "$SCRIPT_PATH" \
+        --target-mount "$TARGET_MOUNT/@home" \
+        --config-name "home" \
+        --allow-users "$test_users" \
+        --force || {
+        umount "$TARGET_MOUNT"
+        return 1
+    }
+    
+    # Verify snapper configuration was created
+    if [ ! -f "/etc/snapper/configs/home" ]; then
+        echo "✗ Snapper configuration for 'home' was not created"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ Snapper configuration was created successfully"
+    
+    # Check user permissions
+    if ! grep -q "ALLOW_USERS=\"$test_users\"" "/etc/snapper/configs/home"; then
+        echo "✗ User permissions not properly configured"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ User permissions properly configured"
+    
+    # Clean up
+    umount "$TARGET_MOUNT"
+    return 0
+}
+
+# Test with timeline disabled
+test_with_timeline_disabled() {
+    echo "Running test: Timeline disabled configuration"
+    
+    # Reset filesystem and prepare new subvolume
+    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
+    prepare_subvolume "@var" || return 1
+    
+    # Run the script with timeline disabled
+    "$SCRIPT_PATH" \
+        --target-mount "$TARGET_MOUNT/@var" \
+        --config-name "var" \
+        --timeline no \
+        --force || {
+        umount "$TARGET_MOUNT"
+        return 1
+    }
+    
+    # Verify snapper configuration was created
+    if [ ! -f "/etc/snapper/configs/var" ]; then
+        echo "✗ Snapper configuration for 'var' was not created"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ Snapper configuration was created successfully"
+    
+    # Check timeline settings
+    if ! grep -q "TIMELINE_CREATE=\"no\"" "/etc/snapper/configs/var"; then
+        echo "✗ Timeline setting not properly disabled"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ Timeline successfully disabled"
+    
+    # Clean up
+    umount "$TARGET_MOUNT"
+    return 0
+}
+
+# Test with custom snapshot retention
+test_with_custom_retention() {
+    echo "Running test: Custom snapshot retention configuration"
+    
+    # Reset filesystem and prepare new subvolume
+    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
+    prepare_subvolume "@data" || return 1
+    
+    # Custom retention values
+    local hourly=10
+    local daily=14
+    local weekly=8
+    
+    # Run the script with custom retention values
+    "$SCRIPT_PATH" \
+        --target-mount "$TARGET_MOUNT/@data" \
+        --config-name "custom" \
+        --hourly "$hourly" \
+        --daily "$daily" \
+        --weekly "$weekly" \
+        --force || {
+        umount "$TARGET_MOUNT"
+        return 1
+    }
+    
+    # Verify snapper configuration was created
+    if [ ! -f "/etc/snapper/configs/custom" ]; then
+        echo "✗ Snapper configuration for 'custom' was not created"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ Snapper configuration was created successfully"
+    
+    # Check retention settings
+    if ! grep -q "TIMELINE_LIMIT_HOURLY=\"$hourly\"" "/etc/snapper/configs/custom" || \
+       ! grep -q "TIMELINE_LIMIT_DAILY=\"$daily\"" "/etc/snapper/configs/custom" || \
+       ! grep -q "TIMELINE_LIMIT_WEEKLY=\"$weekly\"" "/etc/snapper/configs/custom"; then
+        echo "✗ Retention settings not properly configured"
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ Retention settings properly configured"
+    
+    # Clean up
+    umount "$TARGET_MOUNT"
     return 0
 }
