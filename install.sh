@@ -302,6 +302,7 @@ run_tests() {
     run_cmd 2 "Creating images directory in container" "mkdir -p tests/container/rootfs/images"
     run_cmd 2 "Creating target disk image" "dd if=/dev/zero of=tests/container/rootfs/images/target-disk.img bs=1M count=500 status=none"
     run_cmd 2 "Creating backup disk image" "dd if=/dev/zero of=tests/container/rootfs/images/backup-disk.img bs=1M count=300 status=none"
+    run_cmd 2 "Flushing disk writes" "sync"
     
     # Phase 3: Test configuration
     log_phase 3 "Starting test configuration phase"

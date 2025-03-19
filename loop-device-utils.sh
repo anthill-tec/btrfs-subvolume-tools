@@ -208,6 +208,27 @@ apply_loop_device_fixes() {
     fi
   done
   
+  # NEW CODE: Explicitly set up loop devices with image files
+  # Detach any existing associations for these loop devices
+  if type run_cmd >/dev/null 2>&1; then
+    run_cmd 3 "Detaching loop8 if used" "losetup -d /dev/loop8 2>/dev/null || true"
+    run_cmd 3 "Detaching loop9 if used" "losetup -d /dev/loop9 2>/dev/null || true"
+    
+    # Explicitly associate loop8 and loop9 with our image files
+    run_cmd 3 "Setting up target loop device" "losetup /dev/loop8 /var/lib/machines/$container_name/images/target-disk.img"
+    run_cmd 3 "Setting up backup loop device" "losetup /dev/loop9 /var/lib/machines/$container_name/images/backup-disk.img"
+    
+    # Ensure very broad permissions
+    run_cmd 3 "Setting permissions" "chmod 666 /dev/loop8 /dev/loop9"
+  else
+    # Non-logging version
+    losetup -d /dev/loop8 2>/dev/null || true
+    losetup -d /dev/loop9 2>/dev/null || true
+    losetup /dev/loop8 /var/lib/machines/$container_name/images/target-disk.img
+    losetup /dev/loop9 /var/lib/machines/$container_name/images/backup-disk.img
+    chmod 666 /dev/loop8 /dev/loop9
+  fi
+  
   # 6. Create a configuration file to help container scripts find loop devices
   if type run_cmd >/dev/null 2>&1; then
     run_cmd 3 "Creating loop_devices.conf in container" "cat > /var/lib/machines/$container_name/loop_devices.conf << EOF
