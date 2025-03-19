@@ -208,7 +208,7 @@ apply_loop_device_fixes() {
     fi
   done
   
-  # NEW CODE: Explicitly set up loop devices with image files
+  # 6. Explicitly set up loop devices with image files
   # Detach any existing associations for these loop devices
   if type run_cmd >/dev/null 2>&1; then
     run_cmd 3 "Detaching loop8 if used" "losetup -d /dev/loop8 2>/dev/null || true"
@@ -229,7 +229,7 @@ apply_loop_device_fixes() {
     chmod 666 /dev/loop8 /dev/loop9
   fi
   
-  # 6. Create a configuration file to help container scripts find loop devices
+  # 7. Create a configuration file to help container scripts find loop devices
   if type run_cmd >/dev/null 2>&1; then
     run_cmd 3 "Creating loop_devices.conf in container" "cat > /var/lib/machines/$container_name/loop_devices.conf << EOF
 # Loop device configuration for BTRFS Subvolume Tools tests
@@ -247,13 +247,17 @@ BACKUP_LOOP=/dev/loop9
 EOF
   fi
   
-  # 7. Set up a better systemd-nspawn configuration
+  # 8. Set up a comprehensive nspawn configuration with proper permissions
   if type run_cmd >/dev/null 2>&1; then
     run_cmd 3 "Creating nspawn configuration" "cat > '/etc/systemd/nspawn/$container_name.nspawn' << EOF
 [Exec]
+# Maintain existing capabilities
 Capability=CAP_SYS_ADMIN CAP_MKNOD CAP_SYS_MODULE
+# Disable user namespacing to avoid permission issues
+PrivateUsers=no
 
 [Files]
+# Bind necessary loop and control devices
 BindReadOnly=/dev/loop-control
 Bind=/dev/loop0
 Bind=/dev/loop1
@@ -269,21 +273,25 @@ Bind=/dev/loop10
 Bind=/dev/btrfs-control
 
 [DeviceAllow]
-# Allow loop devices
-Property=block-loop
-Value=rw
+# Allow all block devices with full permissions
+Property=block
+Value=rwm
 
-# Allow btrfs control
+# Allow all character devices needed for btrfs
 Property=char-misc
-Value=rw
+Value=rwm
 EOF"
   else
     echo "Creating nspawn configuration"
     cat > "/etc/systemd/nspawn/$container_name.nspawn" << EOF
 [Exec]
+# Maintain existing capabilities
 Capability=CAP_SYS_ADMIN CAP_MKNOD CAP_SYS_MODULE
+# Disable user namespacing to avoid permission issues
+PrivateUsers=no
 
 [Files]
+# Bind necessary loop and control devices
 BindReadOnly=/dev/loop-control
 Bind=/dev/loop0
 Bind=/dev/loop1
@@ -299,13 +307,13 @@ Bind=/dev/loop10
 Bind=/dev/btrfs-control
 
 [DeviceAllow]
-# Allow loop devices
-Property=block-loop
-Value=rw
+# Allow all block devices with full permissions
+Property=block
+Value=rwm
 
-# Allow btrfs control
+# Allow all character devices needed for btrfs
 Property=char-misc
-Value=rw
+Value=rwm
 EOF
   fi
   
@@ -313,58 +321,6 @@ EOF
     log_phase 3 "Loop device setup complete"
   else
     echo "Loop device setup complete"
-  fi
-}
-
-# Create an enhanced container configuration for loop device access
-enhance_container_config() {
-  local container_name="$1"
-  local config_file="/etc/systemd/nspawn/$container_name.nspawn"
-  
-  # Log this operation if logging functions are available
-  if type log_phase >/dev/null 2>&1; then
-    log_phase 3 "Enhancing container configuration for loop device access"
-  else
-    echo "Enhancing container configuration for loop device access"
-  fi
-  
-  # Create a more robust nspawn configuration with necessary capabilities
-  cat > "$config_file" << EOF
-[Exec]
-Capability=all
-SystemCallFilter=@mount
-SystemCallFilter=@swap
-SystemCallFilter=@privileged
-
-[Files]
-BindReadOnly=/dev/loop-control
-# Bind btrfs-control device for btrfs operations
-Bind=/dev/btrfs-control
-EOF
-
-  # Bind all loop devices with read/write access
-  for i in {0..9}; do
-    if [ -e "/dev/loop$i" ]; then
-      echo "Bind=/dev/loop$i" >> "$config_file"
-    fi
-  done
-
-  cat >> "$config_file" << EOF
-
-[DeviceAllow]
-Property=block-loop
-Value=rw
-
-# Allow btrfs-control device
-Property=char-misc
-Value=rw
-EOF
-
-  # Report success
-  if type log_phase >/dev/null 2>&1; then
-    log_phase 3 "Enhanced container configuration for loop device access"
-  else
-    echo "Enhanced container configuration for loop device access"
   fi
 }
 
