@@ -1,12 +1,12 @@
-#!/bin/sh
-# Global setup for BTRFS Subvolume Tools tests
+#!/bin/bash
+# Global setup for Project tests
 
 setup_all() {
     echo "Preparing global test environment..."
     
     # Ensure we have root permissions
     if [ "$(id -u)" -ne 0 ]; then
-        echo "${RED}Error: Tests must be run with root privileges${NC}"
+        echo -e "${RED}Error: Tests must be run with root privileges${NC}"
         return 1
     fi
     
@@ -45,8 +45,8 @@ setup_all() {
         export TEST_TARGET_IMAGE="$TARGET_IMAGE"
         export TEST_BACKUP_IMAGE="$BACKUP_IMAGE"
         echo "Located disk images for testing:"
-        echo "  Target: $TEST_TARGET_IMAGE"
-        echo "  Backup: $TEST_BACKUP_IMAGE"
+        echo " Target: $TEST_TARGET_IMAGE"
+        echo " Backup: $TEST_BACKUP_IMAGE"
     else
         echo "Warning: Could not locate test disk images"
         # Not returning error as images might be located elsewhere

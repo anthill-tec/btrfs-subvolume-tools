@@ -1,5 +1,5 @@
-#!/bin/sh
-# Global teardown for BTRFS Subvolume Tools tests
+#!/bin/bash
+# Global teardown for Project tests
 
 teardown_all() {
     echo "Cleaning up global test environment..."
@@ -22,8 +22,8 @@ teardown_all() {
     fi
     
     # Clean up any other temporary files or directories
-    if [ -d /tmp/test-btrfs-* ]; then
-        rm -rf /tmp/test-btrfs-* 2>/dev/null || true
+    if ls /tmp/test-*/ >/dev/null 2>&1; then
+        rm -rf /tmp/test-*/ 2>/dev/null || true
     fi
     
     echo "Global cleanup complete"
