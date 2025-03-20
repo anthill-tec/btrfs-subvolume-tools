@@ -1,9 +1,4 @@
-  echo -e "  Force Update:       ${YELLOW}$FORCE_UPDATE${NC}"      -f|--force)
-        FORCE_UPDATE=true
-        shift
-        ;;
-  echo "  -f, --force             Force update of existing configurations without prompting"# Add command-line option for forcing configuration updates
-FORCE_UPDATE=false#!/bin/bash
+#!/bin/bash
 set -e  # Exit on error
 
 # Color output
@@ -28,6 +23,7 @@ BACKGROUND_COMPARISON="yes"
 NUMBER_CLEANUP="yes"
 ENABLE_PACMAN_HOOKS="yes"
 ENABLE_SYSTEMD_TIMERS="yes"
+FORCE_UPDATE=false
 
 #
 # Utility functions
@@ -45,6 +41,7 @@ show_help() {
   echo "  -c, --config-name NAME           Configuration name (default: basename of mount point)"
   echo "  -u, --allow-users USERS          Comma-separated list of users allowed to use snapper"
   echo "  -t, --timeline BOOL              Enable timeline snapshots (default: $TIMELINE_CREATE)"
+  echo "  -f, --force                      Force update of existing configurations without prompting"
   echo "  --hourly NUMBER                  Number of hourly snapshots to keep (default: $TIMELINE_LIMIT_HOURLY)"
   echo "  --daily NUMBER                   Number of daily snapshots to keep (default: $TIMELINE_LIMIT_DAILY)"
   echo "  --weekly NUMBER                  Number of weekly snapshots to keep (default: $TIMELINE_LIMIT_WEEKLY)"
@@ -324,6 +321,7 @@ main() {
   echo -e "  Snapshot Limits:    ${YELLOW}H:$TIMELINE_LIMIT_HOURLY D:$TIMELINE_LIMIT_DAILY W:$TIMELINE_LIMIT_WEEKLY M:$TIMELINE_LIMIT_MONTHLY Y:$TIMELINE_LIMIT_YEARLY${NC}"
   echo -e "  Pacman Hooks:       ${YELLOW}$ENABLE_PACMAN_HOOKS${NC}"
   echo -e "  Systemd Timers:     ${YELLOW}$ENABLE_SYSTEMD_TIMERS${NC}"
+  echo -e "  Force Update:       ${YELLOW}$FORCE_UPDATE${NC}"
   echo
   
   # Run all configuration steps
@@ -374,6 +372,10 @@ parse_arguments() {
       -t|--timeline)
         TIMELINE_CREATE="$2"
         shift 2
+        ;;
+      -f|--force)
+        FORCE_UPDATE=true
+        shift
         ;;
       --hourly)
         TIMELINE_LIMIT_HOURLY="$2"

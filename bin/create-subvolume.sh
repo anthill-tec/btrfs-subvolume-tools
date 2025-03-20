@@ -70,11 +70,11 @@ mount_target_if_needed() {
     if [ "$current_device" != "$device" ]; then
       echo -e "${RED}Error: $mount_point is mounted from $current_device, not $device${NC}"
       return 1
-    fi
+    }
     echo -e "${GREEN}$mount_point is already correctly mounted from $device${NC}"
     return 0
   else
-    # Not mounted, prompt to mount
+    # Not mounted, mount it
     echo -e "${YELLOW}$mount_point is not mounted. Mounting $device to $mount_point...${NC}"
     mount "$device" "$mount_point" || {
       echo -e "${RED}Failed to mount $device to $mount_point${NC}"
@@ -155,7 +155,7 @@ cleanup_temp_mount() {
     done < "/tmp/mnt_previous_mounts.txt"
     
     rm "/tmp/mnt_previous_mounts.txt"
-  }
+  fi
   return 0
 }
 
@@ -176,7 +176,7 @@ update_fstab() {
   if [ -z "$device_uuid" ]; then
     echo -e "${RED}Error: Could not determine UUID for $device${NC}"
     return 1
-  }
+  fi
 
   # Update fstab entry
   if grep -q "$mount_point" /etc/fstab; then
@@ -372,7 +372,7 @@ create_subvolume() {
     if [[ ! $REPLY =~ ^[Yy]$ ]]; then
       echo -e "${RED}Operation cancelled${NC}"
       return 1
-    }
+    fi
     echo -e "${YELLOW}Proceeding with empty backup...${NC}"
   else
     # Copy files with reflink
