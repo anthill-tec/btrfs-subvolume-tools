@@ -350,6 +350,7 @@ prepare_target() {
       
       if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "${YELLOW}Non-interactive mode: Automatically continuing with unmount${NC}"
+        continue_decision="y"
       else
         read -p "Continue anyway? (Y/n): " -n 1 -r continue_decision
         echo
@@ -362,17 +363,29 @@ prepare_target() {
       fi
     fi
 
+    # Temporarily disable exit on error
+    set +e
+    
     # Unmount target
     echo -e "${YELLOW}Unmounting $TARGET_MOUNT${NC}"
-    umount "$TARGET_MOUNT" || { 
+    umount "$TARGET_MOUNT" 
+    local unmount_status=$?
+    
+    # Restore exit on error
+    set -e
+    
+    # Handle unmount result
+    if [ $unmount_status -ne 0 ]; then
       echo -e "${RED}Failed to unmount $TARGET_MOUNT - processes may still be using it${NC}"
       if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "${YELLOW}Non-interactive mode: Proceeding despite unmount failure${NC}"
+        # Continue without exiting
       else
         exit 1
       fi
-    }
-    echo -e "${GREEN}Successfully unmounted $TARGET_MOUNT${NC}"
+    else
+      echo -e "${GREEN}Successfully unmounted $TARGET_MOUNT${NC}"
+    fi
   else
     echo -e "${GREEN}Target $TARGET_MOUNT is not mounted, which is good for subvolume creation${NC}"
   fi
