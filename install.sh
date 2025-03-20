@@ -263,7 +263,7 @@ run_tests() {
     log_phase 2 "Using pacstrap to create base container"
     
     # Fixed command - include util-linux to ensure losetup is available
-    run_cmd 2 "Installing base container with pacstrap" "pacstrap -c tests/container/rootfs base systemd bash btrfs-progs snapper snap-pac util-linux lsof"
+    run_cmd 2 "Installing base container with pacstrap" "pacstrap -c tests/container/rootfs base systemd bash sudo btrfs-progs snapper snap-pac util-linux lsof"
     
     if [ $? -ne 0 ]; then
         log_phase 2 "Error: Pacstrap failed to create the container."

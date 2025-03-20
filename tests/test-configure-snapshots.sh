@@ -8,10 +8,11 @@ TARGET_MOUNT=""
 TARGET_DEVICE=""
 SCRIPT_PATH=""
 
+# Debug mode flag - can be set from the environment
+DEBUG_MODE="${DEBUG_MODE:-false}"
+
 # Setup test environment
 setup() {
-    echo "Setting up test environment..."
-    
     # Use the global temp directory provided by setup_all.sh
     TEST_DIR="$TEST_TEMP_DIR/configure-snapshots-test"
     mkdir -p "$TEST_DIR"
@@ -35,8 +36,12 @@ setup() {
     
     # Format device with btrfs
     echo "Formatting device with btrfs..."
-    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
-    
+    if $DEBUG_MODE; then
+        mkfs.btrfs -f "$TARGET_DEVICE" || return 1
+    else
+        mkfs.btrfs -f "$TARGET_DEVICE" 2>/dev/null || return 1
+    fi
+
     return 0
 }
 
@@ -64,8 +69,6 @@ prepare_subvolume() {
 }
 
 teardown() {
-    echo "Cleaning up test environment..."
-    
     # Stop snapper services that might be keeping the mountpoint busy
     systemctl stop snapper-timeline.timer snapper-cleanup.timer 2>/dev/null || true
     systemctl stop snapper-timeline.service snapper-cleanup.service 2>/dev/null || true
@@ -172,6 +175,78 @@ test_default_config() {
     return 0
 }
 
+
+# Function to ensure sudoers file exists with correct permissions
+ensure_sudoers_file() {
+    local sudoers_path="/etc/sudoers"
+    
+    # Check if sudoers file exists
+    if [[ ! -f "$sudoers_path" ]]; then
+        echo "Sudoers file does not exist. Creating..."
+        
+        # Create sudoers file with correct permissions
+        touch "$sudoers_path"
+        chmod 440 "$sudoers_path"
+        chown root:root "$sudoers_path"
+        
+        # Add default include directive
+        echo "#includedir /etc/sudoers.d" > "$sudoers_path"
+        
+        echo "Created sudoers file with default configuration."
+    fi
+
+    # Verify file exists and has correct permissions
+    if [[ ! -f "$sudoers_path" ]] || [[ $(stat -c "%a %U %G" "$sudoers_path") != "440 root root" ]]; then
+        echo "Error: Unable to create or verify sudoers file."
+        return 1
+    fi
+
+    return 0
+}
+
+# Function to verify wheel group existence
+verify_wheel_group() {
+    # Use getent to check group existence
+    if getent group wheel > /dev/null 2>&1; then
+        echo "Wheel group exists."
+        return 0
+    else
+        echo "Error: Wheel group not found. Ensure system is properly configured."
+        return 1
+    fi
+}
+
+# Function to safely add wheel group sudo permissions
+add_wheel_sudo_permissions() {
+    # Ensure sudoers file exists
+    if ! ensure_sudoers_file; then
+        echo "Cannot proceed without valid sudoers file."
+        exit 1
+    fi
+    
+    # First, verify wheel group exists
+    if ! verify_wheel_group; then
+        echo "Cannot proceed without wheel group."
+        exit 1
+    fi
+
+    # Check if the sudo line already exists
+    if ! grep -q '%wheel ALL=(ALL:ALL) ALL' /etc/sudoers; then
+        # Safely modify sudoers using visudo
+        EDITOR='sed -i "\$a%wheel ALL=(ALL:ALL) ALL"' visudo
+        
+        # Verify modification
+        if grep -q '%wheel ALL=(ALL:ALL) ALL' /etc/sudoers; then
+            echo "Successfully added wheel group sudo permissions."
+        else
+            echo "Failed to add wheel group sudo permissions."
+            exit 1
+        fi
+    else
+        echo "Wheel group sudo permissions already exist."
+    fi
+}
+
 # Test with user permissions
 test_with_user_permissions() {
     echo "Running test: User permissions configuration"
@@ -182,8 +257,10 @@ test_with_user_permissions() {
     
     # Create test users for this test
     echo "Creating test users..."
+    add_wheel_sudo_permissions
     useradd -m testuser1 2>/dev/null || true
     usermod -aG sudo testuser1 2>/dev/null || true
+    usermod -aG wheel testuser1 2>/dev/null || true
     useradd -m testuser2 2>/dev/null || true
     usermod -aG sudo testuser2 2>/dev/null || true
     
