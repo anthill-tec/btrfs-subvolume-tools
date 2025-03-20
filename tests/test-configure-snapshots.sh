@@ -63,24 +63,59 @@ prepare_subvolume() {
     return 0
 }
 
-# Clean up after test - simplified because global teardown handles most cleanup
 teardown() {
     echo "Cleaning up test environment..."
     
-    # Try to remove any snapper configurations we created
+    # Stop snapper services that might be keeping the mountpoint busy
+    systemctl stop snapper-timeline.timer snapper-cleanup.timer 2>/dev/null || true
+    systemctl stop snapper-timeline.service snapper-cleanup.service 2>/dev/null || true
+    
+    # Kill any snapper processes that might be running
+    pkill -f "snapper.*test" 2>/dev/null || true
+    
+    # Remove snapper configurations to release locks
     for config in test home var custom; do
         snapper -c "$config" delete-config 2>/dev/null || true
     done
     
-    # Unmount any filesystems we might have mounted
-    mount | grep "$TEST_DIR" | awk '{print $3}' | while read mount_point; do
-        umount "$mount_point" 2>/dev/null || true
+    # Try to unmount with retries
+    for i in 1 2 3; do
+        # Check if any mounts exist under TEST_DIR
+        if ! mount | grep -q "$TEST_DIR"; then
+            echo "No mounts found under $TEST_DIR"
+            break
+        fi
+        
+        echo "Unmount attempt $i/3..."
+        
+        # List what's currently mounted
+        echo "Current mounts:"
+        mount | grep "$TEST_DIR"
+        
+        # Check what processes might be using the mount
+        echo "Checking for processes using mounts:"
+        lsof | grep "$TEST_DIR" || echo "No processes found using the mounts"
+        
+        # Try to unmount everything under TEST_DIR
+        mount | grep "$TEST_DIR" | awk '{print $3}' | sort -r | while read mount_point; do
+            echo "Attempting to unmount $mount_point..."
+            umount "$mount_point" 2>/dev/null
+        done
+        
+        # Flush filesystem buffers
+        sync
+        
+        # Wait before retry
+        if [ $i -lt 3 ]; then
+            echo "Waiting before retry..."
+            sleep 3
+        fi
     done
     
     # Remove any test-specific directories
     rm -rf "$TEST_DIR" 2>/dev/null || true
     
-    # Note: The global teardown_all handles loop device cleanup
+    echo "Cleanup completed"
     return 0
 }
 
