@@ -8,13 +8,16 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
-# Default values configured for /home partition
+# Global variables for configuration
 BACKUP_DRIVE="/dev/sdb3"
 BACKUP_MOUNT="/tmp/home_backup"
 TARGET_DEVICE="/dev/nvme1n1p2"
 TARGET_MOUNT="/home"
 SUBVOL_NAME="@home"
 DO_BACKUP=false
+
+# Global variable to store temporary mount point
+TEMP_MOUNT_PATH=""
 
 #
 # Utility functions
@@ -123,8 +126,10 @@ setup_temp_mount() {
   }
   echo -e "${GREEN}Target partition mounted at $mount_point${NC}"
   
-  # Return the mount point
-  echo "$mount_point"
+  # Set the global variable
+  TEMP_MOUNT_PATH="$mount_point"
+  
+  return 0
 }
 
 # Clean up and restore temporary mount
@@ -156,6 +161,10 @@ cleanup_temp_mount() {
     
     rm "/tmp/mnt_previous_mounts.txt"
   fi
+  
+  # Properly unset the global variable
+  unset TEMP_MOUNT_PATH
+  
   return 0
 }
 
@@ -334,16 +343,14 @@ prepare_target() {
     echo -e "${GREEN}Target $TARGET_MOUNT is not mounted, which is good for subvolume creation${NC}"
   fi
   
-  # Set up temporary mount
-  TEMP_MOUNT=$(setup_temp_mount "$TARGET_DEVICE")
+  # Set up temporary mount - this will set TEMP_MOUNT_PATH global variable
+  setup_temp_mount "$TARGET_DEVICE"
   if [ $? -ne 0 ]; then
     echo -e "${RED}Failed to set up temporary mount. Exiting.${NC}"
     exit 1
   fi
   
   echo -e "${GREEN}Target preparation completed${NC}"
-  # Return the temporary mount path
-  echo "$TEMP_MOUNT"
 }
 
 # Phase 4: Create subvolume and copy data
@@ -368,6 +375,7 @@ create_subvolume() {
     echo -e "${RED}Failed to create $SUBVOL_NAME subvolume${NC}"
     return 1
   }
+  
   echo -e "${GREEN}$SUBVOL_NAME subvolume created successfully${NC}"
 
   # Copy data to the subvolume
@@ -451,18 +459,18 @@ main() {
   # Run through all phases in sequence
   check_prerequisites
   handle_backup
-  TEMP_MOUNT=$(prepare_target)
+  prepare_target  # This sets TEMP_MOUNT_PATH
   
-  if ! create_subvolume "$TEMP_MOUNT"; then
+  if ! create_subvolume "$TEMP_MOUNT_PATH"; then
     echo -e "${RED}Failed to create subvolume. Attempting cleanup...${NC}"
-    echo -e "${YELLOW}Attempting cleanup of: $TEMP_MOUNT${NC}"  # Add this debug line
-    cleanup_temp_mount "$TEMP_MOUNT"
+    echo -e "${YELLOW}Attempting cleanup of: $TEMP_MOUNT_PATH${NC}"
+    cleanup_temp_mount "$TEMP_MOUNT_PATH"
     exit 1
   fi
   
   update_system_config
   
-  if ! cleanup_and_finalize "$TEMP_MOUNT"; then
+  if ! cleanup_and_finalize "$TEMP_MOUNT_PATH"; then
     echo -e "${RED}Failed to finalize configuration. Manual intervention may be required.${NC}"
     exit 1
   fi

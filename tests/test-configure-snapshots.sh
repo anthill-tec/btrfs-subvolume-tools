@@ -180,6 +180,11 @@ test_with_user_permissions() {
     mkfs.btrfs -f "$TARGET_DEVICE" || return 1
     prepare_subvolume "@home" || return 1
     
+    # Create test users for this test
+    echo "Creating test users..."
+    useradd -m testuser1 2>/dev/null || true
+    useradd -m testuser2 2>/dev/null || true
+    
     # Test users to allow
     local test_users="testuser1,testuser2"
     
@@ -189,6 +194,9 @@ test_with_user_permissions() {
         --config-name "home" \
         --allow-users "$test_users" \
         --force || {
+        # Clean up users before exiting on error
+        userdel -r testuser1 2>/dev/null || true
+        userdel -r testuser2 2>/dev/null || true
         umount "$TARGET_MOUNT"
         return 1
     }
@@ -196,6 +204,8 @@ test_with_user_permissions() {
     # Verify snapper configuration was created
     if [ ! -f "/etc/snapper/configs/home" ]; then
         echo "✗ Snapper configuration for 'home' was not created"
+        userdel -r testuser1 2>/dev/null || true
+        userdel -r testuser2 2>/dev/null || true
         umount "$TARGET_MOUNT"
         return 1
     fi
@@ -204,10 +214,27 @@ test_with_user_permissions() {
     # Check user permissions
     if ! grep -q "ALLOW_USERS=\"$test_users\"" "/etc/snapper/configs/home"; then
         echo "✗ User permissions not properly configured"
+        userdel -r testuser1 2>/dev/null || true
+        userdel -r testuser2 2>/dev/null || true
         umount "$TARGET_MOUNT"
         return 1
     fi
     echo "✓ User permissions properly configured"
+    
+    # Test if users can create snapshots (optional but valuable)
+    if ! su - testuser1 -c "snapper -c home create -d 'Test snapshot by testuser1'" 2>/dev/null; then
+        echo "✗ User testuser1 unable to create snapshot"
+        userdel -r testuser1 2>/dev/null || true
+        userdel -r testuser2 2>/dev/null || true
+        umount "$TARGET_MOUNT"
+        return 1
+    fi
+    echo "✓ User permissions functional - snapshot created successfully"
+
+    # Clean up test users
+    echo "Cleaning up test users..."
+    userdel -r testuser1 2>/dev/null || true
+    userdel -r testuser2 2>/dev/null || true
     
     # Clean up
     umount "$TARGET_MOUNT"
