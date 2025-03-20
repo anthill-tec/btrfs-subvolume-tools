@@ -186,7 +186,7 @@ test_with_user_permissions() {
     useradd -m testuser2 2>/dev/null || true
     
     # Test users to allow
-    local test_users="testuser1,testuser2"
+    local test_users="testuser1 testuser2"
     
     # Run the script with user permissions
     "$SCRIPT_PATH" \
