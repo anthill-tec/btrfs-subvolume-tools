@@ -149,7 +149,8 @@ cleanup_temp_mount() {
   local mount_point="$1"
   
   echo -e "${YELLOW}Unmounting temporary mount at $mount_point${NC}"
-  umount "$mount_point" || { 
+  delay 2
+  umount -lf "$mount_point" || { 
     echo -e "${RED}Failed to unmount temporary mount${NC}"
     return 1
   }
