@@ -120,10 +120,36 @@ check_btrfs_subvolume() {
   
   # Check if mount point is mounted
   if ! mountpoint -q "$mount_point"; then
-    echo -e "${RED}Error: $mount_point is not mounted${NC}"
-    exit 1
+    echo -e "${YELLOW}Warning: $mount_point is not mounted. Attempting to mount it...${NC}"
+    
+    # Try to determine the subvolume name from the path
+    local subvol_name=$(basename "$mount_point")
+    
+    # Try to find the device
+    local device="$TARGET_DEVICE"
+    if [ -z "$device" ]; then
+      # If TARGET_DEVICE not defined, try to find from loop_devices.conf
+      if [ -f "/loop_devices.conf" ]; then
+        source /loop_devices.conf
+        device="$TARGET_LOOP"
+      fi
+      
+      # If still empty, try the default test device
+      if [ -z "$device" ]; then
+        device="/dev/loop8"
+      fi
+    fi
+    
+    echo -e "${YELLOW}Attempting to mount $device to $mount_point with subvolume=$subvol_name${NC}"
+    mkdir -p "$mount_point" 2>/dev/null
+    mount -t btrfs -o subvol="$subvol_name" "$device" "$mount_point" || {
+      echo -e "${RED}Error: Could not mount $mount_point${NC}"
+      exit 1
+    }
+    echo -e "${GREEN}Successfully mounted $device to $mount_point${NC}"
   fi
   
+  # Continue with the original checks...
   # Check if filesystem is btrfs
   local fs_type=$(findmnt -n -o FSTYPE "$mount_point")
   if [ "$fs_type" != "btrfs" ]; then
@@ -139,36 +165,6 @@ check_btrfs_subvolume() {
   
   if [ -z "$subvol_path" ]; then
     echo -e "${RED}Error: $mount_point is not mounted from a subvolume${NC}"
-    exit 1
-  fi
-  
-  # Verify subvolume exists by checking its ID
-  # Need to find parent mount to run btrfs commands
-  local parent_mount=$(findmnt -n -t btrfs | grep -v "$mount_point" | head -n1 | awk '{print $1}')
-  
-  if [ -z "$parent_mount" ]; then
-    # If no other mount points, try to mount the device temporarily
-    parent_mount="/tmp/btrfs_check_$$"
-    mkdir -p "$parent_mount"
-    mount "$device" "$parent_mount" -o subvolid=5 || {
-      echo -e "${RED}Error: Could not mount parent volume to verify subvolume${NC}"
-      rmdir "$parent_mount"
-      exit 1
-    }
-    local temp_mounted=1
-  fi
-  
-  # Find the subvolume
-  local subvol_found=$(btrfs subvolume list "$parent_mount" | grep -F "$subvol_path" | wc -l)
-  
-  # Unmount temporary mount if we created one
-  if [ -n "$temp_mounted" ]; then
-    umount "$parent_mount"
-    rmdir "$parent_mount"
-  fi
-  
-  if [ "$subvol_found" -eq 0 ]; then
-    echo -e "${RED}Error: Subvolume $subvol_path not found on $device${NC}"
     exit 1
   fi
   

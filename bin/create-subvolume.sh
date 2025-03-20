@@ -351,10 +351,20 @@ create_subvolume() {
   local temp_mount="$1"
   
   echo -e "${BLUE}Phase 4: Creating subvolume and copying data${NC}"
+    
+  # Make sure temp_mount exists and is valid
+  if [ -z "$temp_mount" ] || [ ! -d "$temp_mount" ]; then
+    echo -e "${RED}Error: Invalid temporary mount path: $temp_mount${NC}"
+    return 1
+  fi
   
-  # Create the subvolume
+  # Create the subvolume with full path validation
   echo -e "${YELLOW}Creating $SUBVOL_NAME subvolume${NC}"
-  btrfs subvolume create "$temp_mount/$SUBVOL_NAME" || { 
+  local subvol_path="$temp_mount/$SUBVOL_NAME"
+  
+  echo -e "${YELLOW}Creating subvolume at: $subvol_path${NC}"  # Add this debug line
+  
+  btrfs subvolume create "$subvol_path" || { 
     echo -e "${RED}Failed to create $SUBVOL_NAME subvolume${NC}"
     return 1
   }
@@ -445,6 +455,7 @@ main() {
   
   if ! create_subvolume "$TEMP_MOUNT"; then
     echo -e "${RED}Failed to create subvolume. Attempting cleanup...${NC}"
+    echo -e "${YELLOW}Attempting cleanup of: $TEMP_MOUNT${NC}"  # Add this debug line
     cleanup_temp_mount "$TEMP_MOUNT"
     exit 1
   fi
