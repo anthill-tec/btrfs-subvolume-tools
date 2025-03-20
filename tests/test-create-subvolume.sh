@@ -10,10 +10,12 @@ TARGET_DEVICE=""
 BACKUP_DEVICE=""
 SCRIPT_PATH=""
 
+# Debug mode flag - can be set from the environment
+DEBUG_MODE="${DEBUG_MODE:-false}"
+
 # Setup test environment 
 setup() {
-    echo "Setting up test environment..."
-    
+
     # Use the global temp directory provided by setup_all.sh
     TEST_DIR="$TEST_TEMP_DIR/create-subvolume-test"
     mkdir -p "$TEST_DIR"
@@ -43,8 +45,13 @@ setup() {
     
     # Format both devices with btrfs
     echo "Formatting devices with btrfs..."
-    mkfs.btrfs -f "$TARGET_DEVICE" || return 1
-    mkfs.btrfs -f "$BACKUP_DEVICE" || return 1
+    if $DEBUG_MODE; then
+        mkfs.btrfs -f "$TARGET_DEVICE" || return 1
+        mkfs.btrfs -f "$BACKUP_DEVICE" || return 1
+    else
+        mkfs.btrfs -f "$TARGET_DEVICE" 2>/dev/null || return 1
+        mkfs.btrfs -f "$BACKUP_DEVICE" 2>/dev/null || return 1 
+    fi
     
     return 0
 }
@@ -282,8 +289,6 @@ test_system_var_subvolume() {
 
 # Clean up after test - simplified because global teardown handles most cleanup
 teardown() {
-    echo "Cleaning up test environment..."
-    
     # Unmount any filesystems we might have mounted
     mount | grep "$TEST_DIR" | awk '{print $3}' | while read mount_point; do
         umount "$mount_point" 2>/dev/null || true
