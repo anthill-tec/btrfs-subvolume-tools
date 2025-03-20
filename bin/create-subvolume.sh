@@ -15,6 +15,7 @@ TARGET_DEVICE="/dev/nvme1n1p2"
 TARGET_MOUNT="/home"
 SUBVOL_NAME="@home"
 DO_BACKUP=false
+NON_INTERACTIVE=false
 
 # Global variable to store temporary mount point
 TEMP_MOUNT_PATH=""
@@ -30,17 +31,20 @@ show_help() {
   echo "Usage: $0 [options]"
   echo
   echo "Options:"
-  echo "  -h, --help             Show this help message"
-  echo "  -b, --backup           Perform backup before creating subvolume"
-  echo "  -d, --backup-drive     Backup drive device (default: $BACKUP_DRIVE)"
-  echo "  -m, --backup-mount     Backup mount point (default: $BACKUP_MOUNT)"
-  echo "  -t, --target-device    Target device to modify (default: $TARGET_DEVICE)"
-  echo "  -p, --target-mount     Target mount point (default: $TARGET_MOUNT)"
-  echo "  -s, --subvol-name      Subvolume name (default: $SUBVOL_NAME)"
+  echo "  -h, --help                 Show this help message"
+  echo "  -b, --backup               Perform backup before creating subvolume"
+  echo "  -d, --backup-drive DEVICE  Backup drive device (default: $BACKUP_DRIVE)"
+  echo "  -m, --backup-mount PATH    Backup mount point (default: $BACKUP_MOUNT)"
+  echo "  -t, --target-device DEVICE Target device to modify (default: $TARGET_DEVICE)"
+  echo "  -p, --target-mount PATH    Target mount point (default: $TARGET_MOUNT)"
+  echo "  -s, --subvol-name NAME     Subvolume name (default: $SUBVOL_NAME)"
+  echo "  -n, --non-interactive      Run without prompting for user input"
   echo
   echo "Example:"
   echo "  $0 --backup --backup-drive /dev/sdc1 --subvol-name @myhome"
   echo "  $0 --target-mount /var --subvol-name @var"
+  echo "  $0 -b -d /dev/sdc1 -s @myhome"
+  echo "  $0 -p /var -s @var -n"
   echo
 }
 
@@ -101,22 +105,30 @@ setup_temp_mount() {
     echo -e "${YELLOW}Warning: $mount_point is currently in use with the following mounts:${NC}"
     mount | grep "$mount_point" | sed 's/^/  /'
     
-    read -p "Would you like to unmount these and proceed? (y/n): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+    if [ "$NON_INTERACTIVE" = true ]; then
+      echo -e "${YELLOW}Non-interactive mode: Automatically unmounting existing mounts${NC}"
+      unmount_decision="y"
+    else
+      read -p "Would you like to unmount these and proceed? (Y/n): " -n 1 -r unmount_decision
+      echo
+      # Default to "y" if user just presses Enter
+      unmount_decision=${unmount_decision:-y}
+    fi
+    
+    if [[ "$unmount_decision" =~ ^[Yy]$ ]]; then
+      # Save current mounts for later restoration
+      mount | grep "$mount_point" > "/tmp/mnt_previous_mounts.txt"
+      
+      # Unmount all mounts under /mnt
+      umount -R "$mount_point" || {
+        echo -e "${RED}Failed to unmount $mount_point. Please free it manually and try again.${NC}"
+        return 1
+      }
+      echo -e "${GREEN}Successfully unmounted all mounts from $mount_point${NC}"
+    else
       echo -e "${RED}Operation cancelled${NC}"
       return 1
     fi
-    
-    # Save current mounts for later restoration
-    mount | grep "$mount_point" > "/tmp/mnt_previous_mounts.txt"
-    
-    # Unmount all mounts under /mnt
-    umount -R "$mount_point" || {
-      echo -e "${RED}Failed to unmount $mount_point. Please free it manually and try again.${NC}"
-      return 1
-    }
-    echo -e "${GREEN}Successfully unmounted all mounts from $mount_point${NC}"
   fi
   
   echo -e "${YELLOW}Mounting target partition to temporary location${NC}"
@@ -301,9 +313,20 @@ handle_backup() {
     echo -e "${YELLOW}Using existing backup at $BACKUP_MOUNT${NC}"
     BACKUP_SOURCE="$BACKUP_MOUNT"
     
-    # Verify backup is actually there - note: we don't exit here as we'll ask for confirmation later
+    # Verify backup is actually there
     if [ ! "$(ls -A "$BACKUP_SOURCE" 2>/dev/null)" ]; then
       echo -e "${YELLOW}Warning: Backup directory appears to be empty.${NC}"
+      
+      if [ "$NON_INTERACTIVE" = true ]; then
+        echo -e "${YELLOW}Non-interactive mode: Continuing with empty backup${NC}"
+      else
+        read -p "Continue with empty backup? This will create an empty subvolume (y/n): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+          echo -e "${RED}Operation cancelled${NC}"
+          exit 1
+        fi
+      fi
     fi
   fi
   
@@ -324,11 +347,18 @@ prepare_target() {
       echo -e "${RED}Processes still using $TARGET_MOUNT:${NC}"
       echo "$PROCS"
       echo -e "${YELLOW}It's recommended to run this script in emergency mode.${NC}"
-      read -p "Continue anyway? (y/n): " -n 1 -r
-      echo
-      if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${RED}Operation cancelled${NC}"
-        exit 1
+      
+      if [ "$NON_INTERACTIVE" = true ]; then
+        echo -e "${YELLOW}Non-interactive mode: Automatically continuing with unmount${NC}"
+      else
+        read -p "Continue anyway? (Y/n): " -n 1 -r continue_decision
+        echo
+        # Default to "y" if user just presses Enter
+        continue_decision=${continue_decision:-y}
+        if [[ ! $continue_decision =~ ^[Yy]$ ]]; then
+          echo -e "${RED}Operation cancelled${NC}"
+          exit 1
+        fi
       fi
     fi
 
@@ -336,7 +366,11 @@ prepare_target() {
     echo -e "${YELLOW}Unmounting $TARGET_MOUNT${NC}"
     umount "$TARGET_MOUNT" || { 
       echo -e "${RED}Failed to unmount $TARGET_MOUNT - processes may still be using it${NC}"
-      exit 1
+      if [ "$NON_INTERACTIVE" = true ]; then
+        echo -e "${YELLOW}Non-interactive mode: Proceeding despite unmount failure${NC}"
+      else
+        exit 1
+      fi
     }
     echo -e "${GREEN}Successfully unmounted $TARGET_MOUNT${NC}"
   else
@@ -369,13 +403,12 @@ create_subvolume() {
   echo -e "${YELLOW}Creating $SUBVOL_NAME subvolume${NC}"
   local subvol_path="$temp_mount/$SUBVOL_NAME"
   
-  echo -e "${YELLOW}Creating subvolume at: $subvol_path${NC}"  # Add this debug line
+  echo -e "${YELLOW}Creating subvolume at: $subvol_path${NC}"
   
   btrfs subvolume create "$subvol_path" || { 
     echo -e "${RED}Failed to create $SUBVOL_NAME subvolume${NC}"
     return 1
   }
-  
   echo -e "${GREEN}$SUBVOL_NAME subvolume created successfully${NC}"
 
   # Copy data to the subvolume
@@ -385,11 +418,18 @@ create_subvolume() {
   # Check if backup is empty and ask for confirmation
   if [ -z "$(ls -A "$BACKUP_SOURCE")" ]; then
     echo -e "${RED}Warning: Backup directory appears to be empty.${NC}"
-    read -p "Continue with empty backup? This will create an empty subvolume (y/n): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-      echo -e "${RED}Operation cancelled${NC}"
-      return 1
+    
+    if [ "$NON_INTERACTIVE" = true ]; then
+      echo -e "${YELLOW}Non-interactive mode: Continuing with empty backup${NC}"
+    else
+      read -p "Continue with empty backup? This will create an empty subvolume (Y/n): " -n 1 -r empty_backup_decision
+      echo
+      # Default to "y" if user just presses Enter
+      empty_backup_decision=${empty_backup_decision:-y}
+      if [[ ! $empty_backup_decision =~ ^[Yy]$ ]]; then
+        echo -e "${RED}Operation cancelled${NC}"
+        return 1
+      fi
     fi
     echo -e "${YELLOW}Proceeding with empty backup...${NC}"
   else
@@ -454,6 +494,7 @@ main() {
   echo -e "  Target Mount:     ${YELLOW}$TARGET_MOUNT${NC}"
   echo -e "  Subvolume Name:   ${YELLOW}$SUBVOL_NAME${NC}"
   echo -e "  Perform Backup:   ${YELLOW}$DO_BACKUP${NC}"
+  echo -e "  Non-Interactive:  ${YELLOW}$NON_INTERACTIVE${NC}"
   echo
   
   # Run through all phases in sequence
@@ -512,6 +553,10 @@ parse_arguments() {
       -s|--subvol-name)
         SUBVOL_NAME="$2"
         shift 2
+        ;;
+      -n|--non-interactive)
+        NON_INTERACTIVE=true
+        shift
         ;;
       *)
         echo -e "${RED}Unknown option: $1${NC}"

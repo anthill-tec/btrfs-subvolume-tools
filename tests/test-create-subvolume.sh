@@ -119,7 +119,8 @@ test_with_defaults_and_backup() {
         --target-mount "$TARGET_MOUNT" \
         --backup-drive "$BACKUP_DEVICE" \
         --backup-mount "$BACKUP_MOUNT" \
-        --backup || return 1
+        --backup \
+        --non-interactive || return 1
     
     # Verify results
     verify_subvolume "@home" || return 1
@@ -168,7 +169,8 @@ test_with_custom_subvolume() {
         --backup-drive "$BACKUP_DEVICE" \
         --backup-mount "$BACKUP_MOUNT" \
         --subvol-name "$custom_subvol" \
-        --backup || return 1
+        --backup \
+        --non-interactive || return 1
     
     # Verify results with the custom subvolume name
     verify_subvolume "$custom_subvol" || return 1
@@ -200,7 +202,8 @@ test_with_existing_backup() {
         --target-mount "$TARGET_MOUNT" \
         --backup-drive "$BACKUP_DEVICE" \
         --backup-mount "$BACKUP_MOUNT" \
-        --subvol-name "@reused_backup" || return 1
+        --subvol-name "@reused_backup" \
+        --non-interactive || return 1
     
     # Mount and verify data was copied from backup
     mount "$TARGET_DEVICE" "$TARGET_MOUNT" || return 1
@@ -253,7 +256,8 @@ test_system_var_subvolume() {
         --backup-drive "$BACKUP_DEVICE" \
         --backup-mount "$BACKUP_MOUNT" \
         --subvol-name "@var" \
-        --backup || return 1
+        --backup \
+        --non-interactive || return 1
     
     # Mount and verify structure
     mount "$TARGET_DEVICE" "$var_target" || return 1
