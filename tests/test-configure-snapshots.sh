@@ -183,7 +183,9 @@ test_with_user_permissions() {
     # Create test users for this test
     echo "Creating test users..."
     useradd -m testuser1 2>/dev/null || true
+    usermod -aG sudo testuser1 2>/dev/null || true
     useradd -m testuser2 2>/dev/null || true
+    usermod -aG sudo testuser2 2>/dev/null || true
     
     # Test users to allow
     local test_users="testuser1 testuser2"
