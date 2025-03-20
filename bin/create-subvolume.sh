@@ -70,7 +70,7 @@ mount_target_if_needed() {
     if [ "$current_device" != "$device" ]; then
       echo -e "${RED}Error: $mount_point is mounted from $current_device, not $device${NC}"
       return 1
-    }
+    fi
     echo -e "${GREEN}$mount_point is already correctly mounted from $device${NC}"
     return 0
   else
@@ -266,7 +266,7 @@ handle_backup() {
     if [ "$FS_TYPE" != "btrfs" ]; then
       echo -e "${RED}Error: $TARGET_MOUNT is not a btrfs filesystem (found: $FS_TYPE)${NC}"
       exit 1
-    }
+    fi
     
     # Perform backup
     echo -e "${YELLOW}Starting backup of $TARGET_MOUNT to $BACKUP_MOUNT${NC}"

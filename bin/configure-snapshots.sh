@@ -148,7 +148,7 @@ check_btrfs_subvolume() {
   
   if [ -z "$parent_mount" ]; then
     # If no other mount points, try to mount the device temporarily
-    parent_mount="/tmp/btrfs_check_$"
+    parent_mount="/tmp/btrfs_check_$$"
     mkdir -p "$parent_mount"
     mount "$device" "$parent_mount" -o subvolid=5 || {
       echo -e "${RED}Error: Could not mount parent volume to verify subvolume${NC}"
