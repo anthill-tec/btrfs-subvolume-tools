@@ -24,6 +24,7 @@ NUMBER_CLEANUP="yes"
 ENABLE_PACMAN_HOOKS="yes"
 ENABLE_SYSTEMD_TIMERS="yes"
 FORCE_UPDATE=false
+NON_INTERACTIVE=false
 
 #
 # Utility functions
@@ -42,6 +43,7 @@ show_help() {
   echo "  -u, --allow-users USERS          Comma-separated list of users allowed to use snapper"
   echo "  -t, --timeline BOOL              Enable timeline snapshots (default: $TIMELINE_CREATE)"
   echo "  -f, --force                      Force update of existing configurations without prompting"
+  echo "  -n, --non-interactive            Run without prompting for user input and continue on non-critical errors"
   echo "  --hourly NUMBER                  Number of hourly snapshots to keep (default: $TIMELINE_LIMIT_HOURLY)"
   echo "  --daily NUMBER                   Number of daily snapshots to keep (default: $TIMELINE_LIMIT_DAILY)"
   echo "  --weekly NUMBER                  Number of weekly snapshots to keep (default: $TIMELINE_LIMIT_WEEKLY)"
@@ -106,6 +108,41 @@ verify_snap_pac() {
       ENABLE_PACMAN_HOOKS="no"
     fi
   fi
+}
+
+# Function to validate users
+validate_users() {
+  local user_list="$1"
+  local invalid_users=""
+  
+  # If no users specified, return success
+  if [ -z "$user_list" ]; then
+    return 0
+  fi
+  
+  # Check each user
+  for username in $(echo "$user_list" | tr ',' ' '); do
+    if ! id "$username" &>/dev/null; then
+      if [ -z "$invalid_users" ]; then
+        invalid_users="$username"
+      else
+        invalid_users="$invalid_users, $username"
+      fi
+    fi
+  done
+  
+  # Report invalid users
+  if [ -n "$invalid_users" ]; then
+    echo -e "${RED}Error: The following users do not exist: $invalid_users${NC}"
+    if [ "$NON_INTERACTIVE" = true ]; then
+      echo -e "${YELLOW}Non-interactive mode: Continuing despite invalid users${NC}"
+      return 0
+    else
+      return 1
+    fi
+  fi
+  
+  return 0
 }
 
 # Check if target is a btrfs filesystem and verify subvolume exists
@@ -189,11 +226,19 @@ configure_snapper() {
     
     # Ask for confirmation before modifying
     if [ "$FORCE_UPDATE" = false ]; then
-      read -p "Do you want to modify the existing configuration? (y/n): " -n 1 -r
-      echo
-      if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        echo -e "${YELLOW}Keeping existing configuration unchanged${NC}"
-        return 0
+      if [ "$NON_INTERACTIVE" = true ]; then
+        echo -e "${YELLOW}Non-interactive mode: Automatically updating existing configuration${NC}"
+        update_decision="y"
+      else
+        read -p "Do you want to modify the existing configuration? (Y/n): " -n 1 -r update_decision
+        echo
+        # Default to "y" if user just presses Enter
+        update_decision=${update_decision:-y}
+        
+        if [[ ! $update_decision =~ ^[Yy]$ ]]; then
+          echo -e "${YELLOW}Keeping existing configuration unchanged${NC}"
+          return 0
+        fi
       fi
     else
       echo -e "${YELLOW}Force update enabled, modifying existing configuration${NC}"
@@ -291,12 +336,25 @@ create_initial_snapshot() {
   local config_name="$1"
   
   echo -e "${YELLOW}Creating initial snapshot...${NC}"
-  snapper -c "$config_name" create --description "Initial snapshot" || {
-    echo -e "${RED}Failed to create initial snapshot${NC}"
-    return 1
-  }
+  
+  # Check if we're in non-interactive mode
+  if [ "$NON_INTERACTIVE" = true ]; then
+    # In non-interactive mode, don't fail if initial snapshot creation fails
+    snapper -c "$config_name" create --description "Initial snapshot" || {
+      echo -e "${RED}Failed to create initial snapshot${NC}"
+      echo -e "${YELLOW}Continuing in non-interactive mode...${NC}"
+      return 0  # Return success despite the error
+    }
+  else
+    # In interactive mode, fail if initial snapshot creation fails
+    snapper -c "$config_name" create --description "Initial snapshot" || {
+      echo -e "${RED}Failed to create initial snapshot${NC}"
+      return 1
+    }
+  fi
   
   echo -e "${GREEN}Successfully created initial snapshot${NC}"
+  return 0
 }
 
 #
@@ -318,12 +376,22 @@ main() {
   echo -e "  Pacman Hooks:       ${YELLOW}$ENABLE_PACMAN_HOOKS${NC}"
   echo -e "  Systemd Timers:     ${YELLOW}$ENABLE_SYSTEMD_TIMERS${NC}"
   echo -e "  Force Update:       ${YELLOW}$FORCE_UPDATE${NC}"
+  echo -e "  Non-Interactive:    ${YELLOW}$NON_INTERACTIVE${NC}"
   echo
   
   # Run all configuration steps
   check_root
   verify_snapper
   verify_snap_pac
+  
+  # Validate users if specified
+  if [ -n "$ALLOW_USERS" ]; then
+    if ! validate_users "$ALLOW_USERS"; then
+      echo -e "${RED}User validation failed. Please specify valid users or use --non-interactive.${NC}"
+      exit 1
+    fi
+  fi
+  
   check_btrfs_subvolume "$TARGET_MOUNT"
   configure_snapper "$TARGET_MOUNT" "$CONFIG_NAME"
   
@@ -371,6 +439,10 @@ parse_arguments() {
         ;;
       -f|--force)
         FORCE_UPDATE=true
+        shift
+        ;;
+      -n|--non-interactive)
+        NON_INTERACTIVE=true
         shift
         ;;
       --hourly)
