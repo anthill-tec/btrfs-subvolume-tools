@@ -42,6 +42,8 @@ if [ -f "$TEST_DIR/hooks/setup_all.sh" ]; then
             exit 1
         fi
     fi
+else
+    echo -e "${YELLOW}Did not find setup_all script in hooks, ignoring!${NC}"
 fi
 
 # Track test counts
@@ -155,6 +157,8 @@ if [ -f "$TEST_DIR/hooks/teardown_all.sh" ]; then
     if type teardown_all &>/dev/null; then
         teardown_all || echo -e "${YELLOW}Warning: Global teardown had issues${NC}"
     fi
+else
+    echo -e "${YELLOW}No teardown_all script found in hooks, ignoring!${NC}"
 fi
 
 # Print summary

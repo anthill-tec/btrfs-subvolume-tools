@@ -68,6 +68,7 @@ prepare_test_data() {
     echo "Another test file" > "$TARGET_MOUNT/testdir/nested.txt"
     dd if=/dev/urandom of="$TARGET_MOUNT/testdir/random.bin" bs=1M count=2 status=none
     
+    wait 2
     # Unmount before running the script
     umount "$TARGET_MOUNT"
     return 0

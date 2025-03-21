@@ -251,6 +251,7 @@ EOF
   if type run_cmd >/dev/null 2>&1; then
     run_cmd 3 "Creating nspawn configuration" "cat > '/etc/systemd/nspawn/$container_name.nspawn' << EOF
 [Exec]
+Ephemeral=yes
 # Maintain existing capabilities
 Capability=CAP_SYS_ADMIN CAP_MKNOD CAP_SYS_MODULE
 # Disable user namespacing to avoid permission issues
@@ -285,6 +286,7 @@ EOF"
     echo "Creating nspawn configuration"
     cat > "/etc/systemd/nspawn/$container_name.nspawn" << EOF
 [Exec]
+Ephemeral=yes
 # Maintain existing capabilities
 Capability=CAP_SYS_ADMIN CAP_MKNOD CAP_SYS_MODULE
 # Disable user namespacing to avoid permission issues

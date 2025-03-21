@@ -291,10 +291,12 @@ run_tests() {
     
     # Copy the test-runner script
     run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
-    
+    run_cmd 2 "Creating hooks directory on container" "mkdir -p tests/container/rootfs/root/hooks"
+    run_cmd 2 "Copying all global hooks" "find tests/hooks/ -maxdepth 1 -name '*_all.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/hooks && chmod +x tests/container/rootfs/root/hooks/*_all.sh"
+
     # Copy all test scripts generically
     run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
-    
+
     # Create test disk images
     log_phase 2 "Creating test disk images"
     # Create images directory that matches the path expected by test scripts
@@ -342,17 +344,6 @@ run_tests() {
     
     # Apply loop device fixes
     apply_loop_device_fixes "$CONTAINER_NAME"
-    
-    # Create a systemd override to make the container ephemeral
-    run_cmd 3 "Creating ephemeral container override" "mkdir -p /etc/systemd/system/systemd-nspawn@${CONTAINER_NAME}.service.d/"
-    run_cmd 3 "Configuring ephemeral container" "cat > /etc/systemd/system/systemd-nspawn@${CONTAINER_NAME}.service.d/override.conf << EOF
-[Service]
-ExecStart=
-ExecStart=/usr/bin/systemd-nspawn --quiet --keep-unit --boot --link-journal=try-guest --network-veth -U --settings=override --machine=%i --ephemeral
-EOF"
-    
-    # Reload systemd to pick up the changes
-    run_cmd 3 "Reloading systemd configuration" "systemctl daemon-reload"
     
     # Start the container using machinectl
     run_cmd 3 "Starting container" "machinectl start \"$CONTAINER_NAME\""
