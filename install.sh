@@ -291,8 +291,7 @@ run_tests() {
     
     # Copy the test-runner script
     run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
-    run_cmd 2 "Creating hooks directory on container" "mkdir -p tests/container/rootfs/root/hooks"
-    run_cmd 2 "Copying all global hooks" "find tests/hooks/ -maxdepth 1 -name '*_all.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/hooks && chmod +x tests/container/rootfs/root/hooks/*_all.sh"
+    run_cmd 2 "Copying global hooks" "cp -v tests/global-hooks.sh tests/container/rootfs/root/global-hooks.sh"
 
     # Copy all test scripts generically
     run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"

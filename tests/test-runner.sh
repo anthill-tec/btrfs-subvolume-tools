@@ -30,10 +30,10 @@ echo -e "${BLUE}============================================${NC}"
 echo ""
 
 # Run global setup if available
-if [ -f "$TEST_DIR/hooks/setup_all.sh" ]; then
+if [ -f "$TEST_DIR/global-hooks.sh" ]; then
     echo -e "${YELLOW}Running global setup...${NC}"
     # Source the setup script
-    source "$TEST_DIR/hooks/setup_all.sh"
+    source "$TEST_DIR/global-hooks.sh"
     
     # Run the setup_all function if it exists
     if type setup_all &>/dev/null; then
@@ -43,7 +43,7 @@ if [ -f "$TEST_DIR/hooks/setup_all.sh" ]; then
         fi
     fi
 else
-    echo -e "${YELLOW}Did not find setup_all script in hooks, ignoring!${NC}"
+    echo -e "${YELLOW}Did not global hooks script, ignoring!${NC}"
 fi
 
 # Track test counts
@@ -146,19 +146,12 @@ for TEST_FILE in "$TEST_DIR"/*-test-*.sh; do
     
     echo ""
 done
-
-# Run global teardown if available
-if [ -f "$TEST_DIR/hooks/teardown_all.sh" ]; then
-    echo -e "${YELLOW}Running global teardown...${NC}"
-    # Source the teardown script
-    source "$TEST_DIR/hooks/teardown_all.sh"
-    
-    # Run the teardown_all function if it exists
-    if type teardown_all &>/dev/null; then
-        teardown_all || echo -e "${YELLOW}Warning: Global teardown had issues${NC}"
-    fi
+   
+# Run the teardown_all function if it exists. This happens only if the global-hooks file has been sourced.
+if type teardown_all &>/dev/null; then
+    teardown_all || echo -e "${YELLOW}Warning: Global teardown had issues${NC}"
 else
-    echo -e "${YELLOW}No teardown_all script found in hooks, ignoring!${NC}"
+    echo -e "${YELLOW}Did not find a teardown_all method, ignoring!${NC}"
 fi
 
 # Print summary
