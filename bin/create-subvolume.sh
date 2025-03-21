@@ -299,19 +299,19 @@ handle_backup() {
     BACKUP_DIR="$BACKUP_MOUNT/backup_$TIMESTAMP"
     mkdir -p "$BACKUP_DIR"
     
-     # Temporarily disable exit on error
-    set +e
-
-    # Use cp with reflink for efficiency on btrfs
-    cp -a --reflink=auto "$TARGET_MOUNT"/* "$BACKUP_DIR"/ || { 
-      echo -e "${RED}Backup failed${NC}"
-      exit 1
-    }
-
-      # Restore exit on error
-    set -e
-    
-    echo -e "${GREEN}Backup completed successfully to $BACKUP_DIR${NC}"
+    # Check if directory is empty first
+    if [ "$(ls -A "$TARGET_MOUNT" 2>/dev/null)" ]; then
+      # Directory has files, copy them
+      cp -a --reflink=auto "$TARGET_MOUNT"/* "$BACKUP_DIR"/ || { 
+        echo -e "${RED}Backup failed${NC}"
+        exit 1
+      }
+      echo -e "${GREEN}Backup completed successfully to $BACKUP_DIR${NC}"
+    else
+      # Directory is empty, nothing to copy
+      echo -e "${YELLOW}Source directory $TARGET_MOUNT is empty, no files to backup${NC}"
+      echo -e "${GREEN}Empty backup directory created at $BACKUP_DIR${NC}"
+    fi
     
     # Update backup path to use the new timestamped backup
     BACKUP_SOURCE="$BACKUP_DIR"
