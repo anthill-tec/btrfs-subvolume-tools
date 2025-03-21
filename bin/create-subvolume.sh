@@ -347,7 +347,7 @@ prepare_target() {
     if [ -n "$PROCS" ]; then
       echo -e "${RED}Processes still using $TARGET_MOUNT:${NC}"
       echo "$PROCS"
-      echo -e "${YELLOW}It's recommended to run this script in emergency mode.${NC}"
+      echo -e "${YELLOW}It's recommended to run this script after rebooting to rescue mode.${NC}"
       
       if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "${YELLOW}Non-interactive mode: Automatically continuing with unmount${NC}"
@@ -367,16 +367,47 @@ prepare_target() {
     # Temporarily disable exit on error
     set +e
     
-    # Unmount target
-    echo -e "${YELLOW}Unmounting $TARGET_MOUNT${NC}"
-    umount "$TARGET_MOUNT" 
-    local unmount_status=$?
+    # Add a retry mechanism for unmounting
+    MAX_RETRIES=3
+    retry_count=0
+    unmount_success=false
+
+    while [ $retry_count -lt $MAX_RETRIES ] && [ "$unmount_success" = false ]; do
+      retry_count=$((retry_count+1))
+      echo -e "${YELLOW}Unmount attempt $retry_count of $MAX_RETRIES for $TARGET_MOUNT${NC}"
+      
+      # Try to use different unmount strategies
+      umount "$TARGET_MOUNT"
+      unmount_status=$?
+      
+      if [ $unmount_status -eq 0 ] || ! mountpoint -q "$TARGET_MOUNT"; then
+        unmount_success=true
+        echo -e "${GREEN}Successfully unmounted $TARGET_MOUNT${NC}"
+      elif [ $retry_count -lt $MAX_RETRIES ]; then
+        # Try more aggressive unmount options on subsequent attempts
+        if [ $retry_count -eq 2 ]; then
+          echo -e "${YELLOW}Trying lazy unmount...${NC}"
+          umount -l "$TARGET_MOUNT" && unmount_success=true
+        elif [ $retry_count -eq 3 ]; then
+          echo -e "${YELLOW}Trying forced unmount...${NC}"
+          umount -f "$TARGET_MOUNT" && unmount_success=true
+        fi
+        
+        if [ "$unmount_success" = false ]; then
+          echo -e "${YELLOW}Unmount attempt $retry_count failed, waiting before retry...${NC}"
+          # Force sync to flush pending disk operations
+          sync
+          # Wait before retrying
+          sleep 2
+        fi
+      fi
+    done
     
     # Restore exit on error
     set -e
     
     # Handle unmount result
-    if [ $unmount_status -ne 0 ]; then
+    if [ "$unmount_success" = false ]; then
       echo -e "${RED}Failed to unmount $TARGET_MOUNT - processes may still be using it${NC}"
       if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "${YELLOW}Non-interactive mode: Proceeding despite unmount failure${NC}"
