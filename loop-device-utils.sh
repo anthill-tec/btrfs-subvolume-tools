@@ -228,7 +228,7 @@ apply_loop_device_fixes() {
     losetup /dev/loop9 /var/lib/machines/$container_name/images/backup-disk.img
     chmod 666 /dev/loop8 /dev/loop9
   fi
-  
+
   # 7. Create a configuration file to help container scripts find loop devices
   if type run_cmd >/dev/null 2>&1; then
     run_cmd 3 "Creating loop_devices.conf in container" "cat > /var/lib/machines/$container_name/loop_devices.conf << EOF
@@ -394,6 +394,18 @@ cleanup_loop_devices() {
     fi
   fi
   
+  # Remove any systemd service overrides for this container
+  if [ -n "$container_name" ] && [ -d "/etc/systemd/system/systemd-nspawn@${container_name}.service.d" ]; then
+    if type run_cmd >/dev/null 2>&1; then
+      run_cmd 5 "Removing service overrides" "rm -rf \"/etc/systemd/system/systemd-nspawn@${container_name}.service.d\" 2>/dev/null || true"
+      run_cmd 5 "Reloading systemd configuration" "systemctl daemon-reload"
+    else
+      echo "Removing service overrides"
+      rm -rf "/etc/systemd/system/systemd-nspawn@${container_name}.service.d" 2>/dev/null || true
+      systemctl daemon-reload
+    fi
+  fi
+
   # Clear the variables
   TARGET_LOOP=""
   BACKUP_LOOP=""

@@ -292,7 +292,7 @@ run_tests() {
     # Copy the test-runner script
     run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
     
-    # Copy the test scripts directly
+    # Copy all test scripts generically
     run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
     
     # Create test disk images
@@ -342,6 +342,17 @@ run_tests() {
     
     # Apply loop device fixes
     apply_loop_device_fixes "$CONTAINER_NAME"
+    
+    # Create a systemd override to make the container ephemeral
+    run_cmd 3 "Creating ephemeral container override" "mkdir -p /etc/systemd/system/systemd-nspawn@${CONTAINER_NAME}.service.d/"
+    run_cmd 3 "Configuring ephemeral container" "cat > /etc/systemd/system/systemd-nspawn@${CONTAINER_NAME}.service.d/override.conf << EOF
+[Service]
+ExecStart=
+ExecStart=/usr/bin/systemd-nspawn --quiet --keep-unit --boot --link-journal=try-guest --network-veth -U --settings=override --machine=%i --ephemeral
+EOF"
+    
+    # Reload systemd to pick up the changes
+    run_cmd 3 "Reloading systemd configuration" "systemctl daemon-reload"
     
     # Start the container using machinectl
     run_cmd 3 "Starting container" "machinectl start \"$CONTAINER_NAME\""
@@ -436,6 +447,11 @@ run_tests() {
     
     # Phase 5: Cleanup and results
     log_phase 5 "Starting cleanup and results phase"
+    
+    # Clean up the container if it's still running disable the trap handler during a normal exit. 
+    # This is to make sure that $CONTAINER_NAME is available during cleanup and that a proper clean up happens if we didnt drop out of the main shell process.
+    trap - EXIT 
+    cleanup
     
     # Record end time
     TEST_END_TIME=$(date +%s)

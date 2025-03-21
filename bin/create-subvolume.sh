@@ -423,7 +423,22 @@ prepare_target() {
       if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "${YELLOW}Non-interactive mode: Proceeding despite unmount failure${NC}"
         echo -e "${YELLOW}Warning: This may cause issues with subvolume creation${NC}"
-        # Continue without exiting
+        
+        # Alternative setup in non-interactive mode if unmount fails
+        # Use a different temporary mount location
+        TEMP_MOUNT_PATH="/mnt/alternate_temp_mount"
+        mkdir -p "$TEMP_MOUNT_PATH" 2>/dev/null || true
+        
+        # Try to mount the target device to the alternate location
+        if mount "$TARGET_DEVICE" "$TEMP_MOUNT_PATH"; then
+          echo -e "${GREEN}Mounted $TARGET_DEVICE to alternate location $TEMP_MOUNT_PATH${NC}"
+          echo -e "${GREEN}Will proceed with this alternate mount point${NC}"
+          return 0
+        else
+          echo -e "${RED}Failed to create alternate mount point. Continuing anyway, but expect errors.${NC}"
+          # Still continue without exiting in non-interactive mode
+          return 0
+        fi
       else
         # Only exit in interactive mode
         exit 1
@@ -438,6 +453,11 @@ prepare_target() {
   # Set up temporary mount - this will set TEMP_MOUNT_PATH global variable
   setup_temp_mount "$TARGET_DEVICE"
   if [ $? -ne 0 ]; then
+    # Don't exit in non-interactive mode
+    if [ "$NON_INTERACTIVE" = true ]; then
+      echo -e "${YELLOW}Non-interactive mode: Continuing despite temporary mount failure${NC}"
+      return 0
+    fi
     echo -e "${RED}Failed to set up temporary mount. Exiting.${NC}"
     exit 1
   fi
