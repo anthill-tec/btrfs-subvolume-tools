@@ -1,5 +1,7 @@
 #!/bin/bash
-# A simpler logging system for the BTRFS Subvolume Tools tests with debug mode support
+# Modified version of the logging.sh file to improve test output visibility
+# This change focuses on controlling what appears on the console while maintaining
+# detailed logging to files
 
 # Global log directory
 LOG_DIR=""
@@ -63,8 +65,10 @@ log_phase() {
     # Also add to summary
     echo "[Phase $phase] $message" >> "$LOG_DIR/00_summary.log"
     
-    # Print to console
-    echo "Phase $phase: $message"
+    # Print to console only in debug mode or if in test execution phase
+    if [ "$DEBUG_MODE" = "true" ] || [ "$phase" = "4" ]; then
+        echo "Phase $phase: $message"
+    fi
 }
 
 # Execute a command and log its output
@@ -104,10 +108,15 @@ EOF
     (
         set -o pipefail
         # In debug mode, output to both log file and console
-        # In normal mode, output only to log file
+        # In normal mode, output only to log file EXCEPT for test execution phase
         if [ "$DEBUG_MODE" = "true" ]; then
+            # In debug mode, show all output
+            eval "$command" 2>&1 | tee -a "$log_file"
+        elif [ "$phase" = "4" ]; then
+            # For test execution phase, show output even in normal mode
             eval "$command" 2>&1 | tee -a "$log_file"
         else
+            # For other phases in normal mode, only log, don't show
             eval "$command" >> "$log_file" 2>&1
         fi
     )
@@ -145,6 +154,17 @@ finalize_logs() {
 
 EOF
 
+    # Always show this summary information regardless of debug mode
+    echo ""
+    echo "===================================================="
+    echo "  Test Results"
+    echo "----------------------------------------------------"
+    echo "  Result: $([ "$result" -eq 0 ] && echo "SUCCESS" || echo "FAILURE")"
+    echo "  Exit Code: $result"
+    echo "  Duration: $duration seconds"
+    echo "  Completed: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo "===================================================="
+    
     # If there was a failure and we're not in debug mode, suggest enabling debug mode
     if [ "$result" -ne 0 ] && [ "$DEBUG_MODE" != "true" ]; then
         echo "Tests failed. For more detailed output, run with DEBUG_MODE=true:"

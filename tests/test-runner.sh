@@ -15,6 +15,11 @@ PROJECT_NAME="${PROJECT_NAME:-Project}"
 # Test directory - automatically find the script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEST_DIR="$SCRIPT_DIR"
+if [ -f "$SCRIPT_DIR/test-utils.sh" ]; then
+    source "$SCRIPT_DIR/test-utils.sh"
+else
+    echo -e "${RED}Did not find test-utils script, aborting!${NC}"
+fi
 
 # Ensure we have root permissions
 if [ "$(id -u)" -ne 0 ]; then
@@ -89,61 +94,65 @@ for TEST_FILE in "$TEST_DIR"/*-test-*.sh; do
     
     # For each test function
     for TEST_FUNCTION in "${TEST_FUNCTIONS[@]}"; do
-        TOTAL_TESTS=$((TOTAL_TESTS+1))
         if [ "$TEST_FUNCTION" = "run_test" ]; then
             TEST_NAME="$FILE_NAME"
         else
             TEST_NAME="${TEST_FUNCTION#test_}"  # Remove test_ prefix for display
         fi
-        
-        echo -e "${BLUE}  Running test case: $TEST_NAME${NC}"
-        
+    
         # Create a subshell for test isolation
         (
             # Run setup if it exists
             if type setup &>/dev/null; then
-                echo -e "${YELLOW}  Setting up test environment...${NC}"
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    echo -e "${YELLOW}  Setting up test environment...${NC}"
+                fi
+            
                 if ! setup; then
                     echo -e "${RED}  Test setup failed${NC}"
                     exit 1
                 fi
             fi
-            
-            # Run the test function
-            if $TEST_FUNCTION; then
-                TEST_RESULT=0
-            else
-                TEST_RESULT=1
-            fi
-            
+        
+            # Initialize the test with the extracted name
+            test_init "$TEST_NAME"
+        
+            # Run the actual test function
+            $TEST_FUNCTION
+            TEST_RESULT=$?
+        
+            # Finish the test and capture the result
+            test_finish
+            FINAL_RESULT=$?
+        
             # Run teardown if it exists (always run, even if test failed)
             if type teardown &>/dev/null; then
-                echo -e "${YELLOW}  Cleaning up test environment...${NC}"
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    echo -e "${YELLOW}  Cleaning up test environment...${NC}"
+                fi
+            
                 teardown || echo -e "${YELLOW}  Warning: Test cleanup had issues${NC}"
             fi
-            
-            exit $TEST_RESULT
-        )
         
+            # Return the test result
+            exit $FINAL_RESULT
+        )
+    
         # Capture the result of the subshell
         TEST_RESULT=$?
-        
+    
+        # Update counters based on result
         if [ $TEST_RESULT -eq 0 ]; then
             PASSED=$((PASSED+1))
-            echo -e "${GREEN}  ✓ Test passed: $TEST_NAME${NC}"
         else
             FAILED=$((FAILED+1))
-            echo -e "${RED}  ✗ Test failed: $TEST_NAME${NC}"
         fi
-        
-        echo ""
     done
     
     # Unset all functions from this test file to avoid conflicts
     for FUNC in $(declare -F | awk '{print $3}' | grep -E '^(test_|setup$|teardown$|run_test$)'); do
         unset -f "$FUNC"
     done
-    
     echo ""
 done
    
@@ -155,19 +164,5 @@ else
 fi
 
 # Print summary
-echo -e "${BLUE}============================================${NC}"
-echo -e "${BLUE}               Test Summary                 ${NC}"
-echo -e "${BLUE}============================================${NC}"
-echo -e "Test files:  $TOTAL_FILES"
-echo -e "Total tests: $TOTAL_TESTS"
-echo -e "Passed:      ${GREEN}$PASSED${NC}"
-echo -e "Failed:      ${RED}$FAILED${NC}"
-echo ""
-
-if [ $FAILED -eq 0 ]; then
-    echo -e "${GREEN}All tests passed!${NC}"
-    exit 0
-else
-    echo -e "${RED}Some tests failed. Check output for details.${NC}"
-    exit 1
-fi
+# Print the test summary using the framework's function
+print_test_summary

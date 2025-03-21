@@ -284,15 +284,16 @@ run_tests() {
     
     # Copy bin scripts to container
     run_cmd 2 "Copying bin scripts to container" "mkdir -p tests/container/rootfs/root/bin"
-    run_cmd 2 "Copying scripts" "cp -rv bin/* tests/container/rootfs/root/bin/"
+    run_cmd 2 "Copying scripts" "cp -rv $SCRIPT_DIR/bin/* tests/container/rootfs/root/bin/"
     
     # Prepare test scripts for container environment
     run_cmd 2 "Preparing test scripts for container environment" "cat tests/test-runner.sh | sed 's|/bin/bash|/bin/sh|g' > /tmp/test-runner.sh.tmp"
     
     # Copy the test-runner script
     run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
-    run_cmd 2 "Copying global hooks" "cp -v tests/global-hooks.sh tests/container/rootfs/root/global-hooks.sh"
-
+    run_cmd 2 "Copying global hooks" "cp -v $SCRIPT_DIR/tests/global-hooks.sh tests/container/rootfs/root/global-hooks.sh"
+    run_cmd 2 "Copying test logging framework" "cp -v $SCRIPT_DIR/tests/test-utils.sh tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/test-utils.sh"
+    
     # Copy all test scripts generically
     run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
 
@@ -398,6 +399,13 @@ run_tests() {
     # Create a file to capture test output
     TEST_OUTPUT_FILE="$LOG_DIR/test_output.txt"
     > "$TEST_OUTPUT_FILE"
+
+    # Clear visual separation before starting tests
+    if [ "$DEBUG_MODE" != "true" ]; then
+        echo ""
+        echo -e "${BLUE}=============== RUNNING TESTS ===============${NC}"
+        echo ""
+    fi
     
     # Run tests in the container
     log_phase 4 "Running tests in container $CONTAINER_NAME"
@@ -416,19 +424,25 @@ run_tests() {
     run_cmd 4 "Checking loop device availability" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /dev/loop* || echo \"No loop devices found\"'"
     run_cmd 4 "Checking loop_devices.conf" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cat /loop_devices.conf || echo \"No loop_devices.conf found\"'"
     
+    DEBUG_PARAM=""
+    if [ "$DEBUG_MODE" = "true" ]; then
+        DEBUG_PARAM="DEBUG_MODE=true"
+    fi
+
     # Execute the test runner
     if [ "$DEBUG_MODE" = "true" ]; then
         # In debug mode, show output in real-time
-        run_cmd 4 "Running test-runner.sh in container with /bin/sh" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
+        run_cmd 4 "Running test-runner.sh in container with /bin/sh" \
+            "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
     else
-        # In normal mode, capture output to file only
-        run_cmd 4 "Running test-runner.sh in container with /bin/sh" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' > \"$TEST_OUTPUT_FILE\" 2>&1"
+        # In normal mode, show only the test output
+        echo -e "\n${BLUE}=============== TEST OUTPUT ===============${NC}"
+        run_cmd 4 "Running test-runner.sh in container with /bin/sh" \
+            "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
+        echo -e "${BLUE}==========================================${NC}\n"
     fi
     TEST_RESULT=$?
-    
-    # Check test output file
-    run_cmd 4 "Checking test output" "cat \"$TEST_OUTPUT_FILE\" || echo 'No output found'"
-    
+
     # Check if tests reported failures
     if grep -q "Some tests failed" "$TEST_OUTPUT_FILE"; then
         log_phase 4 "Test script reported failures"
