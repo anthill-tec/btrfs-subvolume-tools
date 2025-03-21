@@ -1,6 +1,6 @@
 #!/bin/bash
-# Project Test Runner
-# Using bash as the baseline for more powerful functionality
+# Improved Test Runner for BTRFS Subvolume Tools
+# Properly integrates with test-utils.sh framework
 
 # Color output
 RED="\033[0;31m"
@@ -12,13 +12,19 @@ NC="\033[0m" # No Color
 # Default project name if not provided
 PROJECT_NAME="${PROJECT_NAME:-Project}"
 
+# Debug mode flag - can be set from the environment
+DEBUG_MODE="${DEBUG_MODE:-false}"
+
 # Test directory - automatically find the script's location
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 TEST_DIR="$SCRIPT_DIR"
+
+# Load the test utilities
 if [ -f "$SCRIPT_DIR/test-utils.sh" ]; then
     source "$SCRIPT_DIR/test-utils.sh"
 else
-    echo -e "${RED}Did not find test-utils script, aborting!${NC}"
+    echo -e "${RED}Error: Did not find test-utils.sh script, aborting!${NC}"
+    exit 1
 fi
 
 # Ensure we have root permissions
@@ -48,34 +54,36 @@ if [ -f "$TEST_DIR/global-hooks.sh" ]; then
         fi
     fi
 else
-    echo -e "${YELLOW}Did not global hooks script, ignoring!${NC}"
+    echo -e "${YELLOW}Did not find global hooks script, ignoring!${NC}"
 fi
 
-# Track test counts
-TOTAL_FILES=0
-TOTAL_TESTS=0
-PASSED=0
-FAILED=0
-
-# Find all test scripts (prefixed with test-)
+# Find all test scripts (matching test- pattern)
 TEST_SCRIPT_NAME=$(basename "$0")
-for TEST_FILE in "$TEST_DIR"/*-test-*.sh; do
+TOTAL_TESTS=0
+PASSED_TESTS=0
+FAILED_TESTS=0
+TEST_FILES=()
+
+# First, collect all test files
+for TEST_FILE in "$TEST_DIR"/*test*.sh; do
     # Skip the test runner itself and non-files
-    if [ "$(basename "$TEST_FILE")" = "$TEST_SCRIPT_NAME" ] || [ ! -f "$TEST_FILE" ]; then
+    if [ "$(basename "$TEST_FILE")" = "$TEST_SCRIPT_NAME" ] || [ ! -f "$TEST_FILE" ] || [[ "$(basename "$TEST_FILE")" == *"test-utils.sh"* ]]; then
         continue
     fi
-    
-    TOTAL_FILES=$((TOTAL_FILES+1))
+    TEST_FILES+=("$TEST_FILE")
+done
+
+# Now process each test file
+for ((i=0; i<${#TEST_FILES[@]}; i++)); do
+    TEST_FILE="${TEST_FILES[$i]}"
     FILE_NAME=$(basename "$TEST_FILE" .sh)
-    FILE_NAME=${FILE_NAME#test-} # Remove test- prefix
     
-    echo -e "${BLUE}Test File $TOTAL_FILES: $FILE_NAME${NC}"
+    echo -e "${BLUE}Test File $(($i+1)): $FILE_NAME${NC}"
     
     # Source the test file to access its functions
     source "$TEST_FILE"
     
     # Find all test_* functions in the file
-    # This works in bash but not in other shells
     TEST_FUNCTIONS=()
     for FUNC in $(declare -F | awk '{print $3}' | grep -E '^test_'); do
         TEST_FUNCTIONS+=("$FUNC")
@@ -99,7 +107,9 @@ for TEST_FILE in "$TEST_DIR"/*-test-*.sh; do
         else
             TEST_NAME="${TEST_FUNCTION#test_}"  # Remove test_ prefix for display
         fi
-    
+        
+        TOTAL_TESTS=$((TOTAL_TESTS+1))
+        
         # Create a subshell for test isolation
         (
             # Run setup if it exists
@@ -107,62 +117,78 @@ for TEST_FILE in "$TEST_DIR"/*-test-*.sh; do
                 if [ "$DEBUG_MODE" = "true" ]; then
                     echo -e "${YELLOW}  Setting up test environment...${NC}"
                 fi
-            
+                
                 if ! setup; then
                     echo -e "${RED}  Test setup failed${NC}"
                     exit 1
                 fi
             fi
-        
-            # Initialize the test with the extracted name
+            
+            # Initialize the test
             test_init "$TEST_NAME"
-        
+            
             # Run the actual test function
             $TEST_FUNCTION
             TEST_RESULT=$?
-        
-            # Finish the test and capture the result
+            
+            # Finish the test with summary
             test_finish
-            FINAL_RESULT=$?
-        
+            FINISH_RESULT=$?
+            
             # Run teardown if it exists (always run, even if test failed)
             if type teardown &>/dev/null; then
                 if [ "$DEBUG_MODE" = "true" ]; then
                     echo -e "${YELLOW}  Cleaning up test environment...${NC}"
                 fi
-            
+                
                 teardown || echo -e "${YELLOW}  Warning: Test cleanup had issues${NC}"
             fi
-        
+            
             # Return the test result
-            exit $FINAL_RESULT
+            exit $FINISH_RESULT
         )
-    
+        
         # Capture the result of the subshell
         TEST_RESULT=$?
-    
+        
         # Update counters based on result
         if [ $TEST_RESULT -eq 0 ]; then
-            PASSED=$((PASSED+1))
+            PASSED_TESTS=$((PASSED_TESTS+1))
         else
-            FAILED=$((FAILED+1))
+            FAILED_TESTS=$((FAILED_TESTS+1))
         fi
     done
     
-    # Unset all functions from this test file to avoid conflicts
+    # Unset all functions from this test file to avoid conflicts with the next test file
     for FUNC in $(declare -F | awk '{print $3}' | grep -E '^(test_|setup$|teardown$|run_test$)'); do
         unset -f "$FUNC"
     done
+    
     echo ""
 done
-   
-# Run the teardown_all function if it exists. This happens only if the global-hooks file has been sourced.
+
+# Run the teardown_all function if it exists
 if type teardown_all &>/dev/null; then
     teardown_all || echo -e "${YELLOW}Warning: Global teardown had issues${NC}"
 else
     echo -e "${YELLOW}Did not find a teardown_all method, ignoring!${NC}"
 fi
 
-# Print summary
-# Print the test summary using the framework's function
+# Print a custom test summary if there were test failures
+echo -e "${BLUE}============================================${NC}"
+echo -e "${BLUE}  TEST SUMMARY${NC}"
+echo -e "${BLUE}============================================${NC}"
+echo -e "Total tests: $TOTAL_TESTS"
+echo -e "Passed:      ${GREEN}$PASSED_TESTS${NC}"
+echo -e "Failed:      ${RED}$FAILED_TESTS${NC}"
+echo ""
+
+# Show failed assertions via the test-utils.sh function
 print_test_summary
+
+# Exit with appropriate status code
+if [ $FAILED_TESTS -gt 0 ]; then
+    exit 1
+else
+    exit 0
+fi
