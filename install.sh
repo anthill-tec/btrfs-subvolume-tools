@@ -293,8 +293,7 @@ run_tests() {
     run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
     
     # Copy the test scripts directly
-    run_cmd 2 "Copying test-create-subvolume.sh" "cp -v tests/test-create-subvolume.sh tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/test-create-subvolume.sh"
-    run_cmd 2 "Copying test-configure-snapshots.sh" "cp -v tests/test-configure-snapshots.sh tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/test-configure-snapshots.sh"
+    run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
     
     # Create test disk images
     log_phase 2 "Creating test disk images"

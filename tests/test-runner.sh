@@ -52,7 +52,7 @@ FAILED=0
 
 # Find all test scripts (prefixed with test-)
 TEST_SCRIPT_NAME=$(basename "$0")
-for TEST_FILE in "$TEST_DIR"/test-*.sh; do
+for TEST_FILE in "$TEST_DIR"/*-test-*.sh; do
     # Skip the test runner itself and non-files
     if [ "$(basename "$TEST_FILE")" = "$TEST_SCRIPT_NAME" ] || [ ! -f "$TEST_FILE" ]; then
         continue

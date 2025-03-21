@@ -299,11 +299,17 @@ handle_backup() {
     BACKUP_DIR="$BACKUP_MOUNT/backup_$TIMESTAMP"
     mkdir -p "$BACKUP_DIR"
     
+     # Temporarily disable exit on error
+    set +e
+
     # Use cp with reflink for efficiency on btrfs
     cp -a --reflink=auto "$TARGET_MOUNT"/* "$BACKUP_DIR"/ || { 
       echo -e "${RED}Backup failed${NC}"
       exit 1
     }
+
+      # Restore exit on error
+    set -e
     
     echo -e "${GREEN}Backup completed successfully to $BACKUP_DIR${NC}"
     
@@ -403,16 +409,23 @@ prepare_target() {
       fi
     done
     
+    # Store the unmount result before restoring exit on error
+    local unmount_result=$unmount_success
+    
     # Restore exit on error
     set -e
     
     # Handle unmount result
-    if [ "$unmount_success" = false ]; then
+    if [ "$unmount_result" = false ]; then
       echo -e "${RED}Failed to unmount $TARGET_MOUNT - processes may still be using it${NC}"
+      
+      # Critical difference: Don't exit in non-interactive mode
       if [ "$NON_INTERACTIVE" = true ]; then
         echo -e "${YELLOW}Non-interactive mode: Proceeding despite unmount failure${NC}"
+        echo -e "${YELLOW}Warning: This may cause issues with subvolume creation${NC}"
         # Continue without exiting
       else
+        # Only exit in interactive mode
         exit 1
       fi
     else
