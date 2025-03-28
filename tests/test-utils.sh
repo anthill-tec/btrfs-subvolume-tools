@@ -64,18 +64,23 @@ logDebug() {
 # Log message at INFO level
 logInfo() {
     local message="$1"
-    echo -e "${CYAN}[INFO] ${message}${NC}"
+    # In non-debug mode, only show INFO messages that start with ✓ (success indicators)
+    if [ "$DEBUG_MODE" = "true" ] || [[ "$message" == "✓"* ]] || [[ "$message" == "Running test:"* ]]; then
+        echo -e "${CYAN}[INFO] ${message}${NC}"
+    fi
 }
 
 # Log message at WARN level
 logWarn() {
     local message="$1"
+    # Always show warnings
     echo -e "${YELLOW}[WARN] ${message}${NC}"
 }
 
 # Log message at ERROR level
 logError() {
     local message="$1"
+    # Always show errors
     echo -e "${RED}[ERROR] ${message}${NC}"
 }
 
@@ -226,6 +231,19 @@ print_test_summary() {
         done
         echo ""
     fi
+    
+    # Always show the test summary banner
+    echo -e "${BLUE}===========================================${NC}"
+    echo -e "${BLUE}  Test Summary${NC}"
+    echo -e "${BLUE}------------------------------------------${NC}"
+    echo -e "${BLUE}  Total Tests: ${TOTAL_TESTS}${NC}"
+    echo -e "${GREEN}  Passed: ${PASSED_TESTS}${NC}"
+    if [ "$FAILED_TESTS" -gt 0 ]; then
+        echo -e "${RED}  Failed: ${FAILED_TESTS}${NC}"
+    else
+        echo -e "${BLUE}  Failed: ${FAILED_TESTS}${NC}"
+    fi
+    echo -e "${BLUE}===========================================${NC}"
     
     # Return overall status (0 for all pass, 1 for any fail)
     return $((FAILED_TESTS > 0 ? 1 : 0))

@@ -8,6 +8,9 @@
 # Get the directory of this script
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
+# Debug output to verify environment variables
+echo "DEBUG_MODE value in bootstrap: ${DEBUG_MODE:-not set}"
+
 # Source the test utilities
 if [ -f "$SCRIPT_DIR/test-utils.sh" ]; then
     echo "Sourcing test utilities from $SCRIPT_DIR/test-utils.sh"

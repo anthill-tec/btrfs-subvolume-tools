@@ -457,18 +457,24 @@ EOF
     DEBUG_PARAM=""
     if [ "$DEBUG_MODE" = "true" ]; then
         DEBUG_PARAM="DEBUG_MODE=true"
+    else
+        DEBUG_PARAM="DEBUG_MODE=false"
     fi
 
     # Execute the test runner
     if [ "$DEBUG_MODE" = "true" ]; then
         # In debug mode, show output in real-time
         run_cmd 4 "Running tests in container with /bin/bash" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}' | tee \"$TEST_OUTPUT_FILE\""
+            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
+        # Copy the log file to TEST_OUTPUT_FILE
+        cp "$LOG_DIR/04_test_execution.log" "$TEST_OUTPUT_FILE"
     else
         # In normal mode, show only the test output
         echo -e "\n${BLUE}=============== TEST OUTPUT ===============${NC}"
         run_cmd 4 "Running tests in container with /bin/bash" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'" | tee "$TEST_OUTPUT_FILE"
+            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
+        # Copy the log file to TEST_OUTPUT_FILE
+        cp "$LOG_DIR/04_test_execution.log" "$TEST_OUTPUT_FILE"
         echo -e "${BLUE}==========================================${NC}\n"
     fi
     TEST_RESULT=$?
