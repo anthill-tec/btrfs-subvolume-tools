@@ -23,16 +23,29 @@ fi
 
 # Define subroutines
 
-# Show help
+# Display help information
 show_help() {
-    echo "BTRFS Subvolume Tools Installation Script"
+    echo "BTRFS Subvolume Tools Installer"
     echo ""
-    echo "Usage: $0 [OPTIONS]"
+    echo "Usage: $0 [options]"
     echo ""
     echo "Options:"
     echo "  --help           Show this help message"
-    echo "  --test           Run tests instead of installing"
+    echo "  --test           Run all tests instead of installing"
+    echo "  --debug-test     Run all tests in debug mode"
+    echo "  --test-suite=NAME  Run a specific test suite file"
+    echo "  --test-case=FUNC   Run a specific test case function"
     echo "  --prefix=PATH    Install to PATH instead of /usr/local"
+    echo ""
+    echo "Examples:"
+    echo "  $0 --test-suite=configure-snapshots"
+    echo "  $0 --test-case=default_config"
+    echo "  $0 --test-suite=configure-snapshots --test-case=default_config"
+    echo ""
+    echo "Notes:"
+    echo "  - Test suite names are flexible: numeric prefixes (e.g., '02-test-') are ignored"
+    echo "  - The .sh extension is optional when specifying a test suite"
+    echo "  - Test case names can be specified with or without the 'test_' prefix"
     echo ""
 }
 
@@ -152,6 +165,10 @@ copy_with_deps() {
 
 # Run tests using machinectl with pacstrap
 run_tests() {
+    local DEBUG_MODE="${1:-false}"
+    local SPECIFIC_TEST="${2:-}"
+    local SPECIFIC_TEST_CASE="${3:-}"
+    
     echo "Running tests with machinectl..."
     
     # Check if we have root privileges
@@ -286,13 +303,26 @@ run_tests() {
     run_cmd 2 "Copying bin scripts to container" "mkdir -p tests/container/rootfs/root/bin"
     run_cmd 2 "Copying scripts" "cp -rv $SCRIPT_DIR/bin/* tests/container/rootfs/root/bin/"
     
-    # Prepare test scripts for container environment
-    run_cmd 2 "Preparing test scripts for container environment" "cat tests/test-runner.sh | sed 's|/bin/bash|/bin/sh|g' > /tmp/test-runner.sh.tmp"
-    
-    # Copy the test-runner script
-    run_cmd 2 "Copying test-runner script" "cp /tmp/test-runner.sh.tmp tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
+    # Copy test scripts directly to container without temporary files
+    run_cmd 2 "Copying test-runner script" "cp -v $SCRIPT_DIR/tests/test-runner.sh tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
+    run_cmd 2 "Copying test-utils script" "cp -v $SCRIPT_DIR/tests/test-utils.sh tests/container/rootfs/root/test-utils.sh && chmod +x tests/container/rootfs/root/test-utils.sh"
     run_cmd 2 "Copying global hooks" "cp -v $SCRIPT_DIR/tests/global-hooks.sh tests/container/rootfs/root/global-hooks.sh"
-    run_cmd 2 "Copying test logging framework" "cp -v $SCRIPT_DIR/tests/test-utils.sh tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/test-utils.sh"
+    
+    # Create a wrapper script that sources test-utils.sh and exports the functions
+    cat > tests/container/rootfs/root/run-tests-wrapper.sh << 'EOF'
+#!/bin/bash
+# Wrapper script to ensure test functions are properly exported
+
+# Source the test utilities
+source ./test-utils.sh
+
+# Export all test functions
+export -f test_init test_finish assert assertEquals assertFileExists assertDirExists assertCmd print_test_summary suppress_unless_debug
+
+# Run the test runner with any arguments passed to this script
+./test-runner.sh "$@"
+EOF
+    run_cmd 2 "Creating test wrapper script" "chmod +x tests/container/rootfs/root/run-tests-wrapper.sh"
     
     # Copy all test scripts generically
     run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
@@ -432,13 +462,13 @@ run_tests() {
     # Execute the test runner
     if [ "$DEBUG_MODE" = "true" ]; then
         # In debug mode, show output in real-time
-        run_cmd 4 "Running test-runner.sh in container with /bin/sh" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
+        run_cmd 4 "Running tests in container with /bin/bash" \
+            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}' | tee \"$TEST_OUTPUT_FILE\""
     else
         # In normal mode, show only the test output
         echo -e "\n${BLUE}=============== TEST OUTPUT ===============${NC}"
-        run_cmd 4 "Running test-runner.sh in container with /bin/sh" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/sh ./test-runner.sh' | tee \"$TEST_OUTPUT_FILE\""
+        run_cmd 4 "Running tests in container with /bin/bash" \
+            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'" | tee "$TEST_OUTPUT_FILE"
         echo -e "${BLUE}==========================================${NC}\n"
     fi
     TEST_RESULT=$?
@@ -483,6 +513,9 @@ main() {
     # Default settings
     INSTALL_MODE=true
     TEST_MODE=false
+    DEBUG_MODE=false
+    SPECIFIC_TEST=""
+    SPECIFIC_TEST_CASE=""
     
     # Parse command line arguments
     for arg in "$@"; do
@@ -496,6 +529,24 @@ main() {
                 INSTALL_MODE=false
                 shift
                 ;;
+            --debug-test)
+                TEST_MODE=true
+                DEBUG_MODE=true
+                INSTALL_MODE=false
+                shift
+                ;;
+            --test-suite=*)
+                TEST_MODE=true
+                INSTALL_MODE=false
+                SPECIFIC_TEST="${arg#*=}"
+                shift
+                ;;
+            --test-case=*)
+                TEST_MODE=true
+                INSTALL_MODE=false
+                SPECIFIC_TEST_CASE="${arg#*=}"
+                shift
+                ;;
             --prefix=*)
                 PREFIX="${arg#*=}"
                 shift
@@ -505,7 +556,7 @@ main() {
     
     # Either install or run tests
     if [ "$TEST_MODE" = true ]; then
-        if ! run_tests; then
+        if ! run_tests "$DEBUG_MODE" "$SPECIFIC_TEST" "$SPECIFIC_TEST_CASE"; then
             echo "Tests failed or encountered an error."
             exit 1
         fi
@@ -515,6 +566,8 @@ main() {
             exit 1
         fi
     fi
+    
+    exit 0
 }
 
 # Run main function

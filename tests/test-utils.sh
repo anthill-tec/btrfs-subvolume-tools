@@ -239,5 +239,96 @@ suppress_unless_debug() {
     else
         "$@" >/dev/null 2>&1
     fi
-    return $?
+}
+
+# Process a test file and run its test functions
+# This is the core function that executes tests in a file
+process_test_file() {
+    local TEST_FILE="$1"
+    local SPECIFIC_TEST_CASE="$2"
+    local FILE_NAME=$(basename "$TEST_FILE" .sh)
+    
+    echo -e "${BLUE}Test File: $FILE_NAME${NC}"
+    
+    # Source the test file to access its functions
+    source "$TEST_FILE"
+    
+    # Find all test_* functions in the file
+    TEST_FUNCTIONS=()
+    for FUNC in $(declare -F | awk '{print $3}' | grep -E '^test_'); do
+        TEST_FUNCTIONS+=("$FUNC")
+    done
+    
+    # If no test_* functions found, try to run the run_test function
+    if [ ${#TEST_FUNCTIONS[@]} -eq 0 ]; then
+        if type run_test &>/dev/null; then
+            TEST_FUNCTIONS=("run_test")
+            echo -e "${YELLOW}No test_* functions found, using run_test instead${NC}"
+        else
+            echo -e "${RED}No test functions found in $FILE_NAME${NC}"
+            return
+        fi
+    fi
+    
+    # Run each test function
+    for ((j=0; j<${#TEST_FUNCTIONS[@]}; j++)); do
+        TEST_FUNCTION="${TEST_FUNCTIONS[$j]}"
+        
+        # If a specific test case was specified, only run that one
+        if [ -n "$SPECIFIC_TEST_CASE" ]; then
+            # Check both with and without test_ prefix
+            if [[ "$TEST_FUNCTION" != "$SPECIFIC_TEST_CASE" && "$TEST_FUNCTION" != "test_$SPECIFIC_TEST_CASE" ]]; then
+                continue
+            fi
+        fi
+        
+        echo -e "${YELLOW}Running test function: $TEST_FUNCTION${NC}"
+        
+        # Run the test in a subshell to isolate environment changes
+        (
+            # Set up the test environment
+            if type setup &>/dev/null; then
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    echo -e "${YELLOW}  Setting up test environment...${NC}"
+                fi
+                
+                setup || {
+                    echo -e "${RED}  Setup failed, skipping test${NC}"
+                    exit 1
+                }
+            fi
+            
+            # Initialize the test
+            test_init "$TEST_FUNCTION"
+            
+            # Run the actual test function
+            $TEST_FUNCTION
+            TEST_RESULT=$?
+            
+            # Finish the test with summary
+            test_finish
+            FINISH_RESULT=$?
+            
+            # Run teardown if it exists (always run, even if test failed)
+            if type teardown &>/dev/null; then
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    echo -e "${YELLOW}  Cleaning up test environment...${NC}"
+                fi
+                
+                teardown || echo -e "${YELLOW}  Warning: Test cleanup had issues${NC}"
+            fi
+            
+            # Return the test result
+            exit $FINISH_RESULT
+        )
+        
+        # Check the result of the subshell
+        if [ $? -eq 0 ]; then
+            PASSED_TESTS=$((PASSED_TESTS+1))
+        else
+            FAILED_TESTS=$((FAILED_TESTS+1))
+        fi
+        
+        TOTAL_TESTS=$((TOTAL_TESTS+1))
+    done
 }
