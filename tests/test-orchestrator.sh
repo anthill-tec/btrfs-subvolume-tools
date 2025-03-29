@@ -507,28 +507,26 @@ main() {
         log_phase 1 "Running test suite: $SUITE_NAME"
         
         # Run the test suite using the copied run_tests function
-        run_tests "$DEBUG" "$test_suite" ""
+        run_tests "$DEBUG" "$SUITE_NAME" ""
         
         RESULT=$?
         TOTAL_SUITES=$((TOTAL_SUITES + 1))
         
         if [ $RESULT -eq 0 ]; then
             PASSED_SUITES=$((PASSED_SUITES + 1))
-            log_phase 1 "✓ Test suite passed: $SUITE_NAME"
+            log_phase 5 "✓ Test suite passed: $SUITE_NAME"
         else
             FAILED_SUITES=$((FAILED_SUITES + 1))
-            log_phase 1 "✗ Test suite failed: $SUITE_NAME"
+            log_phase 5 "✗ Test suite failed: $SUITE_NAME"
         fi
         
-        # Add a 1-second delay to ensure container resources are fully released
-        sleep 1
+        # Add a 5-second delay to ensure container resources are fully released
+        sleep 5
     done
     
-    # Print summary
-    log_phase 5 "Test Orchestration Results"
-    log_phase 5 "Total Test Suites: $TOTAL_SUITES"
-    log_phase 5 "Passed: $PASSED_SUITES"
-    log_phase 5 "Failed: $FAILED_SUITES"
+    # Print summary using the new bannerized function
+    log_orchestration_summary "$TOTAL_SUITES" "$PASSED_SUITES" "$FAILED_SUITES"
+    SUMMARY_RESULT=$?
     
     if [ $FAILED_SUITES -eq 0 ]; then
         return 0

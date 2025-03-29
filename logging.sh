@@ -242,3 +242,52 @@ set_debug_mode() {
     # Export the variable to make it available to child processes
     export DEBUG
 }
+
+# Log a summary of the test orchestration results
+log_orchestration_summary() {
+    local total_suites=$1
+    local passed_suites=$2
+    local failed_suites=$3
+    
+    # Add a summary to the log file
+    cat >> "$LOG_DIR/00_summary.log" << EOF
+
+====================================================
+  Test Orchestration Summary
+----------------------------------------------------
+  Total Test Suites: $total_suites
+  Passed: $passed_suites
+  Failed: $failed_suites
+  Completed: $(date '+%Y-%m-%d %H:%M:%S')
+====================================================
+
+EOF
+
+    # Always show this summary information regardless of debug mode
+    echo ""
+    echo -e "${BOLD}====================================================${NC}"
+    echo -e "${BOLD}  Test Orchestration Summary${NC}"
+    echo -e "${BOLD}----------------------------------------------------${NC}"
+    echo -e "  Total Test Suites: $total_suites"
+    
+    if [ "$passed_suites" -gt 0 ]; then
+        echo -e "  Passed: ${GREEN}$passed_suites${NC}"
+    else
+        echo -e "  Passed: $passed_suites"
+    fi
+    
+    if [ "$failed_suites" -gt 0 ]; then
+        echo -e "  Failed: ${RED}$failed_suites${NC}"
+    else
+        echo -e "  Failed: $failed_suites"
+    fi
+    
+    echo -e "${BOLD}====================================================${NC}"
+    
+    # Return success if all test suites passed
+    if [ "$failed_suites" -eq 0 ]; then
+        return 0
+    else
+        return 1
+    fi
+}
