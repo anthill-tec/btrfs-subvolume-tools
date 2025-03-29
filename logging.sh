@@ -103,10 +103,8 @@ log_phase() {
     # Also add to summary
     echo "[Phase $phase] $message" >> "$LOG_DIR/00_summary.log"
     
-    # Print to console only in debug mode or if in test execution phase
-    if [ "$DEBUG" = "true" ] || [ "$phase" = "4" ]; then
-        echo -e "${phase_color}Phase $phase:${NC} $message"
-    fi
+    # Print to console in both normal and debug modes
+    echo -e "${phase_color}Phase $phase:${NC} $message"
 }
 
 # Execute a command and log its output
