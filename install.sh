@@ -465,13 +465,13 @@ run_tests() {
     # Check if tests reported failures
     if [ "$DEBUG" = "true" ]; then
         # In debug mode, check the detailed log file
-        if grep -q "Some tests failed" "$LOG_DIR/04_test_execution.log" 2>/dev/null; then
+        if grep -q "TEST FAILED:" "$LOG_DIR/04_test_execution.log" 2>/dev/null || grep -q "Failed: [1-9]" "$LOG_DIR/04_test_execution.log" 2>/dev/null; then
             log_phase 4 "Test script reported failures"
             TEST_RESULT=1
         fi
     else
         # In normal mode, check the test_output.log file
-        if grep -q "Some tests failed" "$LOG_DIR/test_output.log" 2>/dev/null; then
+        if grep -q "TEST FAILED:" "$LOG_DIR/test_output.log" 2>/dev/null || grep -q "Failed: [1-9]" "$LOG_DIR/test_output.log" 2>/dev/null; then
             log_phase 4 "Test script reported failures"
             TEST_RESULT=1
         fi
@@ -491,11 +491,6 @@ run_tests() {
     
     # Finalize logs
     log_phase 5 "Finalizing test results"
-    if [ $TEST_RESULT -eq 0 ]; then
-        log_phase 5 "All tests passed!"
-    else
-        log_phase 5 "Some tests failed. Check logs for details."
-    fi
     
     # Add final summary to the log
     finalize_logs $TEST_RESULT "$TEST_DURATION"
@@ -602,10 +597,14 @@ main() {
     
     # Either install or run tests
     if [ "$TEST_MODE" = true ]; then
-        if ! run_tests "$DEBUG" "$SPECIFIC_TEST" "$SPECIFIC_TEST_CASE"; then
-            log_phase 1 "Tests failed or encountered an error."
-            exit 1
+        run_tests "$DEBUG" "$SPECIFIC_TEST" "$SPECIFIC_TEST_CASE"
+        TEST_RESULT=$?
+        
+        # Return the test result
+        if [ $TEST_RESULT -ne 0 ]; then
+            exit $TEST_RESULT
         fi
+        exit 0
     elif [ "$INSTALL_MODE" = true ]; then
         if ! do_install "$PREFIX"; then
             log_phase 1 "Installation failed."

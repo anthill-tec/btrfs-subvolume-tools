@@ -221,8 +221,7 @@ EOF
     # If there was a failure and we're not in debug mode, suggest enabling debug mode
     if [ "$result" -ne 0 ] && [ "$DEBUG" != "true" ]; then
         echo -e "${YELLOW}Tests failed. For more detailed output, run with DEBUG=true:${NC}"
-        echo -e "  ${BOLD}DEBUG=true sudo make test${NC}"
-        echo -e "Full logs are available at: ${BLUE}$LOG_DIR${NC}"
+        echo -e "  ${BOLD}sudo make debug-test${NC}"
     else
         echo -e "Test logs saved to: ${BLUE}$LOG_DIR${NC}"
     fi
