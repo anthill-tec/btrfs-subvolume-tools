@@ -60,23 +60,43 @@ prepare_subvolume() {
     # Try to unmount first in case it's mounted
     umount "$TARGET_MOUNT" 2>/dev/null || true
     
-    execCmd "Mount target device" "mount \"$TARGET_DEVICE\" \"$TARGET_MOUNT\""
-    assert "[ $? -eq 0 ]" "Target device should mount successfully"
+    # Add detailed debugging for loop device status
+    logDebug "Checking loop device status before mounting"
+    execCmd "Check loop device status" "losetup -a | grep loop"
+    execCmd "Check block device" "ls -la $TARGET_DEVICE"
     
-    # Check if subvolume already exists, remove it first if it does
-    if btrfs subvolume list "$TARGET_MOUNT" 2>/dev/null | grep -q "$subvol_name"; then
-        logDebug "Subvolume $subvol_name already exists, removing it first"
-        execCmd "Remove existing subvolume" "btrfs subvolume delete \"$TARGET_MOUNT/$subvol_name\" 2>/dev/null || true"
-    fi
+    # Verify the loop device is properly set up
+    logDebug "Verifying loop device is properly set up"
+    execCmd "Verify loop device" "losetup -j \"$TARGET_DEVICE\" || (logDebug \"Loop device not set up, attempting to set it up now\" && losetup \"$TARGET_DEVICE\" /images/target-disk.img)"
     
-    execCmd "Create test subvolume" "btrfs subvolume create \"$TARGET_MOUNT/$subvol_name\""
-    assert "[ $? -eq 0 ]" "Should create $subvol_name subvolume successfully"
+    # Check loop device status again after verification
+    execCmd "Check loop device status after verification" "losetup -a | grep loop"
     
-    execCmd "Create test files in subvolume" "mkdir -p \"$TARGET_MOUNT/$subvol_name/test-dir\" && \
-                                             echo \"Test file in subvolume\" > \"$TARGET_MOUNT/$subvol_name/test-file.txt\""
+    # Format the device with BTRFS if needed
+    logDebug "Formatting target device with BTRFS filesystem"
+    execCmd "Format target device" "mkfs.btrfs -f \"$TARGET_DEVICE\""
+    assert "[ $? -eq 0 ]" "BTRFS formatting should succeed"
     
-    assert "[ -f \"$TARGET_MOUNT/$subvol_name/test-file.txt\" ]" "Test file should exist in subvolume"
-    logInfo "✓ Test subvolume $subvol_name created successfully"
+    # Mount the root filesystem first
+    logDebug "Mounting root filesystem"
+    execCmd "Mount root filesystem" "mount -o loop \"$TARGET_DEVICE\" \"$TARGET_MOUNT\""
+    assert "[ $? -eq 0 ]" "Root filesystem should mount successfully"
+    
+    # Create the subvolume
+    logDebug "Creating subvolume $subvol_name"
+    execCmd "Create subvolume" "btrfs subvolume create \"$TARGET_MOUNT/$subvol_name\""
+    assert "[ $? -eq 0 ]" "Subvolume creation should succeed"
+    
+    # Unmount the root filesystem
+    logDebug "Unmounting root filesystem"
+    execCmd "Unmount root filesystem" "umount \"$TARGET_MOUNT\""
+    
+    # Now mount the subvolume
+    logDebug "Mounting subvolume"
+    execCmd "Mount subvolume" "mount -o loop,subvol=$subvol_name \"$TARGET_DEVICE\" \"$TARGET_MOUNT\""
+    assert "[ $? -eq 0 ]" "Subvolume should mount successfully"
+    
+    logInfo "✓ Subvolume $subvol_name prepared successfully"
     return 0
 }
 
@@ -144,7 +164,7 @@ test_default_config() {
     
     logInfo "Configuring snapper with default options"
     execCmd "Configure snapper" "\"$SCRIPT_PATH\" \
-        --target-mount \"$TARGET_MOUNT/@home\" \
+        --target-mount \"$TARGET_MOUNT\" \
         --config-name \"test\" \
         --force"
     assert "[ $? -eq 0 ]" "Snapper configuration should succeed"
@@ -175,6 +195,14 @@ test_default_config() {
 test_with_user_permissions() {
     logInfo "Running test: User permissions configuration"
     
+    # Generate a unique config name to avoid conflicts
+    local config_name="home_$(date +%s)"
+    logDebug "Using unique config name: $config_name"
+    
+    # Ensure any previous configs are removed
+    execCmd "Remove any existing config" "snapper -c \"$config_name\" delete-config 2>/dev/null || true"
+    
+    # Reset filesystem and prepare a fresh subvolume
     execCmd "Reset filesystem" "mkfs.btrfs -f \"$TARGET_DEVICE\" || true"
     # Even if format fails, continue
     assert "true" "Filesystem reset should succeed"
@@ -185,23 +213,31 @@ test_with_user_permissions() {
     local test_users="testuser1 testuser2"
     logInfo "Using test users: $test_users"
     
+    # Verify the mount point exists and is a btrfs filesystem
+    execCmd "Verify mount point" "mountpoint -q \"$TARGET_MOUNT\" && btrfs filesystem df \"$TARGET_MOUNT\""
+    assert "[ $? -eq 0 ]" "Target mount should be a valid btrfs mount point"
+    
     logInfo "Configuring snapper with user permissions"
     execCmd "Configure snapper with users" "\"$SCRIPT_PATH\" \
-        --target-mount \"$TARGET_MOUNT/@home\" \
-        --config-name \"home\" \
+        --target-mount \"$TARGET_MOUNT\" \
+        --config-name \"$config_name\" \
         --allow-users \"$test_users\" \
         --force \
         --non-interactive"
+    assert "[ $? -eq 0 ]" "Snapper configuration should succeed"
     
-    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/home\" ]"
+    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/$config_name\" ]"
     assert "[ $? -eq 0 ]" "Snapper configuration file should exist"
     logInfo "✓ Snapper configuration was created successfully"
     
-    execCmd "Check user permissions" "grep -q \"ALLOW_USERS=\\\"$test_users\\\"\" \"/etc/snapper/configs/home\""
+    execCmd "Check user permissions" "grep -q \"ALLOW_USERS=\\\"$test_users\\\"\" \"/etc/snapper/configs/$config_name\""
     assert "[ $? -eq 0 ]" "User permissions should be correctly configured"
     logInfo "✓ User permissions properly configured"
     
     logInfo "☑ Container environment: Skipping actual user testing (configuration verified)"
+    
+    # Clean up this specific config
+    execCmd "Remove test config" "snapper -c \"$config_name\" delete-config 2>/dev/null || true"
     
     execCmd "Unmount target" "umount \"$TARGET_MOUNT\" 2>/dev/null || true"
     return 0
@@ -220,7 +256,7 @@ test_with_timeline_disabled() {
     
     logInfo "Configuring snapper with timeline disabled"
     execCmd "Configure snapper without timeline" "\"$SCRIPT_PATH\" \
-        --target-mount \"$TARGET_MOUNT/@var\" \
+        --target-mount \"$TARGET_MOUNT\" \
         --config-name \"var\" \
         --timeline no \
         --force"
@@ -257,7 +293,7 @@ test_with_custom_retention() {
     
     logInfo "Configuring snapper with custom retention values"
     execCmd "Configure snapper with custom retention" "\"$SCRIPT_PATH\" \
-        --target-mount \"$TARGET_MOUNT/@data\" \
+        --target-mount \"$TARGET_MOUNT\" \
         --config-name \"custom\" \
         --hourly \"$hourly\" \
         --daily \"$daily\" \
