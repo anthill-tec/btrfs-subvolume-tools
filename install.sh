@@ -215,8 +215,31 @@ run_tests() {
         rm -f /tmp/test-*.sh.tmp 2>/dev/null || true
     }
     
-    # Generate unique container name
-    CONTAINER_NAME="btrfs-test-$(date +%Y%m%d-%H%M%S)"
+    # Generate a container name prefix from PROJECT_NAME
+    generate_container_prefix() {
+        local project_name="$1"
+        local prefix=""
+        
+        # If project name contains multiple words, use abbreviation
+        if [[ "$project_name" == *" "* ]]; then
+            # Extract first letter of each word
+            for word in $project_name; do
+                prefix="${prefix}${word:0:1}"
+            done
+            prefix=$(echo "$prefix" | tr '[:upper:]' '[:lower:]')
+        else
+            # Use the full name if it's a single word
+            prefix=$(echo "$project_name" | tr '[:upper:]' '[:lower:]')
+        fi
+        
+        # Limit prefix length and add -test suffix
+        prefix="${prefix:0:10}-test"
+        echo "$prefix"
+    }
+    
+    # Generate unique container name based on PROJECT_NAME
+    CONTAINER_PREFIX=$(generate_container_prefix "$PROJECT_NAME")
+    CONTAINER_NAME="${CONTAINER_PREFIX}-$(date +%Y%m%d-%H%M%S)"
     
     # Set up logging for this test session
     LOG_DIR=$(init_logging "$CONTAINER_NAME")
