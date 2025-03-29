@@ -241,8 +241,18 @@ run_tests() {
     CONTAINER_PREFIX=$(generate_container_prefix "$PROJECT_NAME")
     CONTAINER_NAME="${CONTAINER_PREFIX}-$(date +%Y%m%d-%H%M%S)"
     
+    # Get the current user, even when running with sudo
+    CURRENT_USER=""
+    if [ -n "$SUDO_USER" ]; then
+        CURRENT_USER="$SUDO_USER"
+    elif [ -n "$USER" ]; then
+        CURRENT_USER="$USER"
+    elif [ -n "$LOGNAME" ]; then
+        CURRENT_USER="$LOGNAME"
+    fi
+    
     # Set up logging for this test session
-    LOG_DIR=$(init_logging "$CONTAINER_NAME")
+    LOG_DIR=$(init_logging "$CONTAINER_NAME" "$CURRENT_USER")
     
     # Check if debug mode is enabled
     if [ "$debug" = "true" ]; then

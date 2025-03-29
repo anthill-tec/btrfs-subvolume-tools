@@ -26,6 +26,7 @@ export DEBUG=${DEBUG:-false}
 # Initialize the logging system
 init_logging() {
     local container_name="$1"
+    local current_user="$2"
     
     # Create log directory structure
     LOG_DIR="tests/logs/$container_name"
@@ -54,6 +55,13 @@ EOF
     else
         # In normal mode, just create a single test output file besides summary
         touch "$LOG_DIR/test_output.log"
+    fi
+    
+    # If a current user was provided, change ownership of log directory
+    if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
+        # Change ownership of both the specific log directory and the parent logs directory
+        chown -R "$current_user" "$LOG_DIR"
+        chown "$current_user" "tests/logs" 2>/dev/null || true
     fi
     
     # Return the log directory
