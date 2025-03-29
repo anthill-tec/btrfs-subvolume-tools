@@ -203,12 +203,18 @@ test_with_user_permissions() {
     # Ensure any previous configs are removed
     execCmd "Remove any existing config" "snapper -c \"$config_name\" delete-config 2>/dev/null || true"
     
+    # Clean up any existing snapper configs that might be using the target mount
+    execCmd "List all snapper configs" "snapper list-configs || true"
+    execCmd "Remove all timestamp configs" "for cfg in \$(snapper list-configs | grep -o 'home_[0-9]\\+\\|var_[0-9]\\+\\|custom_[0-9]\\+' 2>/dev/null); do snapper -c \"\$cfg\" delete-config; done 2>/dev/null || true"
+    
     # Reset filesystem and prepare a fresh subvolume
     execCmd "Reset filesystem" "mkfs.btrfs -f \"$TARGET_DEVICE\" || true"
     # Even if format fails, continue
     assert "true" "Filesystem reset should succeed"
     
-    prepare_subvolume "@home"
+    # Use a unique subvolume name with timestamp
+    local subvol_name="@home_$(date +%s)"
+    prepare_subvolume "$subvol_name"
     assert "[ $? -eq 0 ]" "Subvolume preparation should succeed"
     
     local test_users="testuser1 testuser2"
