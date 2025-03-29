@@ -36,6 +36,7 @@ show_help() {
     echo "  --test-suite=NAME  Run a specific test suite file"
     echo "  --test-case=FUNC   Run a specific test case function"
     echo "  --prefix=PATH    Install to PATH instead of /usr/local"
+    echo "  --debug          Enable debug mode"
     echo ""
     echo "Examples:"
     echo "  $0 --test-suite=configure-snapshots"
@@ -165,9 +166,13 @@ copy_with_deps() {
 
 # Run tests using machinectl with pacstrap
 run_tests() {
-    local DEBUG_MODE="${1:-false}"
-    local SPECIFIC_TEST="${2:-}"
-    local SPECIFIC_TEST_CASE="${3:-}"
+    local debug="${1:-false}"
+    local specific_test="$2"
+    local specific_test_case="$3"
+    
+    # Set DEBUG for the entire script environment
+    DEBUG="$debug"
+    export DEBUG
     
     log_phase 1 "Running tests with machinectl..."
     
@@ -216,7 +221,7 @@ run_tests() {
     LOG_DIR=$(init_logging "$CONTAINER_NAME")
     
     # Check if debug mode is enabled
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$debug" = "true" ]; then
         log_phase 1 "Debug mode is enabled - detailed command output will be shown"
     else
         log_phase 1 "Debug mode is disabled - only essential output will be shown"
@@ -308,25 +313,64 @@ run_tests() {
     run_cmd 2 "Copying test-utils script" "cp -v $SCRIPT_DIR/tests/test-utils.sh tests/container/rootfs/root/test-utils.sh && chmod +x tests/container/rootfs/root/test-utils.sh"
     run_cmd 2 "Copying global hooks" "cp -v $SCRIPT_DIR/tests/global-hooks.sh tests/container/rootfs/root/global-hooks.sh"
     
-    # Create a wrapper script that sources test-utils.sh and exports the functions
-    cat > tests/container/rootfs/root/run-tests-wrapper.sh << 'EOF'
+    # Create a dynamically generated bootstrap script with environment variables included
+    cat > tests/container/rootfs/root/test-bootstrap.sh << EOF
 #!/bin/bash
-# Wrapper script to ensure test functions are properly exported
+# Test Bootstrap Script - Dynamically generated with environment variables
+# This script initializes the test environment by:
+# 1. Loading test utilities and functions
+# 2. Exporting functions to make them available in subshells
+# 3. Running the test runner with provided arguments
+
+# Default environment variables
+export DEBUG="false"
+export PROJECT_NAME="${PROJECT_NAME:-Project}"
+
+# Parse command line arguments
+while [[ \$# -gt 0 ]]; do
+    case \$1 in
+        --debug)
+            export DEBUG="true"
+            shift
+            ;;
+        *)
+            # Store remaining arguments for the test runner
+            break
+            ;;
+    esac
+done
+
+# Get the directory of this script
+SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
 
 # Source the test utilities
-source ./test-utils.sh
+if [ -f "\$SCRIPT_DIR/test-utils.sh" ]; then
+    echo "Sourcing test utilities from \$SCRIPT_DIR/test-utils.sh"
+    # Use the dot operator instead of source for better compatibility
+    . "\$SCRIPT_DIR/test-utils.sh"
+else
+    echo "Error: test-utils.sh not found in \$SCRIPT_DIR"
+    exit 1
+fi
 
-# Export all test functions
-export -f test_init test_finish assert assertEquals assertFileExists assertDirExists assertCmd print_test_summary suppress_unless_debug
+# Source global hooks if available
+if [ -f "\$SCRIPT_DIR/global-hooks.sh" ]; then
+    echo "Sourcing global hooks from \$SCRIPT_DIR/global-hooks.sh"
+    . "\$SCRIPT_DIR/global-hooks.sh"
+fi
 
-# Run the test runner with any arguments passed to this script
-./test-runner.sh "$@"
+# Export all test utility functions
+export -f test_init test_finish assert assertEquals assertFileExists assertDirExists assertCmd
+
+# Run the test runner with any provided arguments
+echo "Running test runner with arguments: \$@"
+./test-runner.sh \$@
 EOF
-    run_cmd 2 "Creating test wrapper script" "chmod +x tests/container/rootfs/root/run-tests-wrapper.sh"
+    run_cmd 2 "Setting bootstrap script permissions" "chmod +x tests/container/rootfs/root/test-bootstrap.sh"
     
     # Copy all test scripts generically
-    run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
-
+    run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' -not -name 'test-bootstrap.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
+    
     # Create test disk images
     log_phase 2 "Creating test disk images"
     # Create images directory that matches the path expected by test scripts
@@ -431,7 +475,7 @@ EOF
     # > "$TEST_OUTPUT_FILE"
 
     # Clear visual separation before starting tests
-    if [ "$DEBUG_MODE" != "true" ]; then
+    if [ "$debug" != "true" ]; then
         log_phase 4 ""
         log_phase 4 "=============== RUNNING TESTS ==============="
         log_phase 4 ""
@@ -454,30 +498,25 @@ EOF
     run_cmd 4 "Checking loop device availability" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /dev/loop* || echo \"No loop devices found\"'"
     run_cmd 4 "Checking loop_devices.conf" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cat /loop_devices.conf || echo \"No loop_devices.conf found\"'"
     
-    # Export DEBUG_MODE and PROJECT_NAME to ensure they're available in the container
-    DEBUG_PARAM=""
-    if [ "$DEBUG_MODE" = "true" ]; then
-        DEBUG_PARAM="DEBUG_MODE=true"
-    else
-        DEBUG_PARAM="DEBUG_MODE=false"
-    fi
-
     # Execute the test runner
     log_phase 4 "Starting test execution phase"
-    if [ "$DEBUG_MODE" = "true" ]; then
-        # In debug mode, show output in real-time
-        run_cmd 4 "Running tests in container with /bin/bash" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && export $DEBUG_PARAM && export PROJECT_NAME=\"${PROJECT_NAME:-Project}\" && /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
+    
+    # Pass DEBUG as a command line argument to the bootstrap script
+    if [ "$DEBUG" = "true" ]; then
+        debug_arg="--debug"
     else
-        # In normal mode, show only the test output
-        log_phase 4 "Test output"
-        run_cmd 4 "Running tests in container with /bin/bash" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && export $DEBUG_PARAM && export PROJECT_NAME=\"${PROJECT_NAME:-Project}\" && /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
+        debug_arg=""
     fi
+    
+    # Execute the command with the debug flag if needed
+    run_cmd 4 "Running tests in container with /bin/bash" \
+        "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && ./test-bootstrap.sh $debug_arg ${specific_test:-} ${specific_test_case:-}'"
+    
+    # Get test exit code
     TEST_RESULT=$?
-
+    
     # Check if tests reported failures
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$DEBUG" = "true" ]; then
         # In debug mode, check the detailed log file
         if grep -q "Some tests failed" "$LOG_DIR/04_test_execution.log" 2>/dev/null; then
             log_phase 4 "Test script reported failures"
@@ -522,53 +561,93 @@ EOF
 
 # Main function
 main() {
+    # Set debug mode if DEBUG environment variable is set to true
+    if [ "$DEBUG" = "true" ]; then
+        echo "DEBUG environment variable is set to true"
+        export DEBUG=true
+    fi
+    
     # Default settings
     INSTALL_MODE=true
     TEST_MODE=false
-    DEBUG_MODE=false
+    DEBUG=false
     SPECIFIC_TEST=""
     SPECIFIC_TEST_CASE=""
     
     # Parse command line arguments
-    for arg in "$@"; do
-        case $arg in
-            --help)
-                show_help
-                exit 0
-                ;;
-            --test)
-                TEST_MODE=true
-                INSTALL_MODE=false
-                shift
-                ;;
-            --debug-test)
-                TEST_MODE=true
-                DEBUG_MODE=true
-                INSTALL_MODE=false
-                shift
-                ;;
-            --test-suite=*)
-                TEST_MODE=true
-                INSTALL_MODE=false
-                SPECIFIC_TEST="${arg#*=}"
-                shift
-                ;;
-            --test-case=*)
-                TEST_MODE=true
-                INSTALL_MODE=false
-                SPECIFIC_TEST_CASE="${arg#*=}"
-                shift
-                ;;
-            --prefix=*)
-                PREFIX="${arg#*=}"
-                shift
-                ;;
-        esac
-    done
+    parse_args() {
+        # Default values
+        INSTALL_MODE="install"
+        INSTALL_DIR="/usr/local/bin"
+        RUN_TESTS="false"
+        TEST_SUITE=""
+        TEST_CASE=""
+        SKIP_DEPS="false"
+        
+        # Explicitly check for DEBUG in the environment and set it if not already set
+        # This ensures DEBUG is properly set even if sudo doesn't preserve it
+        if [ "$DEBUG" != "true" ]; then
+            # Check if DEBUG=true was passed as an environment variable to the script
+            for arg in "$@"; do
+                if [[ "$arg" == *DEBUG=true* ]]; then
+                    export DEBUG=true
+                    echo "Setting DEBUG=true from command line argument"
+                    break
+                fi
+            done
+        fi
+        
+        while [[ $# -gt 0 ]]; do
+            case $1 in
+                --help)
+                    show_help
+                    exit 0
+                    ;;
+                --test)
+                    TEST_MODE=true
+                    INSTALL_MODE=false
+                    shift
+                    ;;
+                --debug-test)
+                    TEST_MODE=true
+                    export DEBUG=true
+                    INSTALL_MODE=false
+                    shift
+                    ;;
+                --debug)
+                    export DEBUG=true
+                    echo "Debug mode enabled via --debug flag"
+                    shift
+                    ;;
+                --test-suite=*)
+                    TEST_MODE=true
+                    INSTALL_MODE=false
+                    SPECIFIC_TEST="${1#*=}"
+                    shift
+                    ;;
+                --test-case=*)
+                    TEST_MODE=true
+                    INSTALL_MODE=false
+                    SPECIFIC_TEST_CASE="${1#*=}"
+                    shift
+                    ;;
+                --prefix=*)
+                    PREFIX="${1#*=}"
+                    shift
+                    ;;
+                *)
+                    # Skip unknown arguments
+                    shift
+                    ;;
+            esac
+        done
+    }
+    
+    parse_args "$@"
     
     # Either install or run tests
     if [ "$TEST_MODE" = true ]; then
-        if ! run_tests "$DEBUG_MODE" "$SPECIFIC_TEST" "$SPECIFIC_TEST_CASE"; then
+        if ! run_tests "$DEBUG" "$SPECIFIC_TEST" "$SPECIFIC_TEST_CASE"; then
             log_phase 1 "Tests failed or encountered an error."
             exit 1
         fi

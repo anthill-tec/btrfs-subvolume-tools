@@ -17,7 +17,7 @@ BOLD="\033[1m"
 NC="\033[0m" # No Color
 
 # Debug mode flag - can be set from the environment
-DEBUG_MODE="${DEBUG_MODE:-false}"
+export DEBUG=${DEBUG:-false}
 
 # Initialize the logging system
 init_logging() {
@@ -34,13 +34,13 @@ init_logging() {
   ${PROJECT_NAME:-Project} Test Run
   Session: $container_name
   Started: $(date '+%Y-%m-%d %H:%M:%S')
-  Debug Mode: $DEBUG_MODE
+  Debug Mode: $DEBUG
 ==================================================
 
 EOF
     
     # Create log files based on debug mode
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$DEBUG" = "true" ]; then
         # Detailed logs for DEBUG mode
         touch "$LOG_DIR/01_pre_installation.log"
         touch "$LOG_DIR/02_tool_setup.log"
@@ -63,7 +63,7 @@ log_phase() {
     
     # Map phase number to log file
     local log_file
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$DEBUG" = "true" ]; then
         # Detailed logging in debug mode
         case "$phase" in
             1) log_file="$LOG_DIR/01_pre_installation.log" ;;
@@ -88,7 +88,7 @@ log_phase() {
     echo "[Phase $phase] $message" >> "$LOG_DIR/00_summary.log"
     
     # Print to console only in debug mode or if in test execution phase
-    if [ "$DEBUG_MODE" = "true" ] || [ "$phase" = "4" ]; then
+    if [ "$DEBUG" = "true" ] || [ "$phase" = "4" ]; then
         echo "Phase $phase: $message"
     fi
 }
@@ -104,7 +104,7 @@ run_cmd() {
     
     # Map phase number to log file
     local log_file
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$DEBUG" = "true" ]; then
         # Detailed logging in debug mode
         case "$phase" in
             1) log_file="$LOG_DIR/01_pre_installation.log" ;;
@@ -137,7 +137,7 @@ EOF
         set -o pipefail
         # In debug mode, output to both log file and console
         # In normal mode, output only to log file EXCEPT for test execution phase
-        if [ "$DEBUG_MODE" = "true" ]; then
+        if [ "$DEBUG" = "true" ]; then
             # In debug mode, show all output
             eval "$command" 2>&1 | tee -a "$log_file"
         elif [ "$phase" = "4" ]; then
@@ -177,7 +177,7 @@ finalize_logs() {
   Exit Code: $result
   Duration: $duration seconds
   Completed: $(date '+%Y-%m-%d %H:%M:%S')
-  Debug Mode: $DEBUG_MODE
+  Debug Mode: $DEBUG
 ==================================================
 
 EOF
@@ -194,9 +194,9 @@ EOF
     echo "===================================================="
     
     # If there was a failure and we're not in debug mode, suggest enabling debug mode
-    if [ "$result" -ne 0 ] && [ "$DEBUG_MODE" != "true" ]; then
-        echo "Tests failed. For more detailed output, run with DEBUG_MODE=true:"
-        echo "  DEBUG_MODE=true sudo make test"
+    if [ "$result" -ne 0 ] && [ "$DEBUG" != "true" ]; then
+        echo "Tests failed. For more detailed output, run with DEBUG=true:"
+        echo "  DEBUG=true sudo make test"
         echo "Full logs are available at: $LOG_DIR"
     else
         echo "Test logs saved to: $LOG_DIR"
@@ -206,5 +206,7 @@ EOF
 # Set debug mode from environment variable
 set_debug_mode() {
     local mode="${1:-false}"
-    DEBUG_MODE="$mode"
+    DEBUG="$mode"
+    # Export the variable to make it available to child processes
+    export DEBUG
 }

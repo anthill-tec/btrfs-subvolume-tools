@@ -15,7 +15,7 @@ install: all
 	install -m 0755 bin/create-subvolume.sh $(DESTDIR)$(BINDIR)/create-subvolume
 	install -m 0755 bin/configure-snapshots.sh $(DESTDIR)$(BINDIR)/configure-snapshots
 	install -d $(DESTDIR)$(MANDIR)/man8
-	install -m 0644 doc/create-subvolume.8.gz $(DESTDIR)$(MANDpIR)/man8/
+	install -m 0644 doc/create-subvolume.8.gz $(DESTDIR)$(MANDIR)/man8/
 	install -m 0644 doc/configure-snapshots.8.gz $(DESTDIR)$(MANDIR)/man8/
 	install -d $(DESTDIR)$(DOCDIR)
 	install -m 0644 README.md $(DESTDIR)$(DOCDIR)/
@@ -56,7 +56,7 @@ debug-test:
 		echo "Please run: sudo make debug-test"; \
 		exit 1; \
 	fi
-	@DEBUG_MODE=true PROJECT_NAME="$(PROJECT_NAME)" ./install.sh --test
+	@DEBUG=true PROJECT_NAME="$(PROJECT_NAME)" ./install.sh --test --debug
 
 test-clean:
 	@echo "Cleaning up test environment..."

@@ -12,7 +12,7 @@ CYAN="\033[0;36m"
 NC="\033[0m" # No Color
 
 # Debug mode flag - can be set from the environment
-DEBUG_MODE="${DEBUG_MODE:-false}"
+DEBUG=${DEBUG:-false}
 
 # Track test statistics globally
 TOTAL_TESTS=0
@@ -42,7 +42,7 @@ test_init() {
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     
     # Output test header
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$DEBUG" = "true" ]; then
         echo -e "\n${BLUE}============================================${NC}"
         echo -e "${BLUE}  TEST: $test_name${NC}"
         echo -e "${BLUE}============================================${NC}"
@@ -56,7 +56,7 @@ test_init() {
 # Log message at DEBUG level
 logDebug() {
     local message="$1"
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$DEBUG" = "true" ]; then
         echo -e "${PURPLE}[DEBUG] ${message}${NC}"
     fi
 }
@@ -65,7 +65,7 @@ logDebug() {
 logInfo() {
     local message="$1"
     # In non-debug mode, only show INFO messages that start with ✓ (success indicators)
-    if [ "$DEBUG_MODE" = "true" ] || [[ "$message" == "✓"* ]] || [[ "$message" == "Running test:"* ]]; then
+    if [ "$DEBUG" = "true" ] || [[ "$message" == "✓"* ]] || [[ "$message" == "Running test:"* ]]; then
         echo -e "${CYAN}[INFO] ${message}${NC}"
     fi
 }
@@ -100,7 +100,7 @@ execCmd() {
     # Run the command and capture output
     (
         set -o pipefail
-        if [ "$DEBUG_MODE" = "true" ]; then
+        if [ "$DEBUG" = "true" ]; then
             # In debug mode, show real-time output
             eval "$command" 2>&1 | tee "$temp_output"
         else
@@ -115,7 +115,7 @@ execCmd() {
         logDebug "Command succeeded with exit code 0"
     else
         logWarn "Command failed with exit code $status"
-        if [ "$DEBUG_MODE" != "true" ]; then
+        if [ "$DEBUG" != "true" ]; then
             # In normal mode, show output on failure
             echo -e "${YELLOW}Command output:${NC}"
             cat "$temp_output"
@@ -145,7 +145,7 @@ assert() {
     if [ $result -eq 0 ]; then
         # Assertion passed
         PASSED_ASSERTIONS=$((PASSED_ASSERTIONS + 1))
-        if [ "$DEBUG_MODE" = "true" ]; then
+        if [ "$DEBUG" = "true" ]; then
             echo -e "  ${GREEN}✓ ASSERT PASSED:${NC} $message"
         fi
     else
@@ -252,7 +252,7 @@ print_test_summary() {
 # Suppress command output unless in debug mode
 # Use this to wrap commands that produce unwanted output
 suppress_unless_debug() {
-    if [ "$DEBUG_MODE" = "true" ]; then
+    if [ "$DEBUG" = "true" ]; then
         "$@"
     else
         "$@" >/dev/null 2>&1
@@ -306,7 +306,7 @@ process_test_file() {
         (
             # Set up the test environment
             if type setup &>/dev/null; then
-                if [ "$DEBUG_MODE" = "true" ]; then
+                if [ "$DEBUG" = "true" ]; then
                     echo -e "${YELLOW}  Setting up test environment...${NC}"
                 fi
                 
@@ -329,7 +329,7 @@ process_test_file() {
             
             # Run teardown if it exists (always run, even if test failed)
             if type teardown &>/dev/null; then
-                if [ "$DEBUG_MODE" = "true" ]; then
+                if [ "$DEBUG" = "true" ]; then
                     echo -e "${YELLOW}  Cleaning up test environment...${NC}"
                 fi
                 
@@ -350,3 +350,5 @@ process_test_file() {
         TOTAL_TESTS=$((TOTAL_TESTS+1))
     done
 }
+
+echo "DEBUG value in test-utils.sh: $DEBUG"
