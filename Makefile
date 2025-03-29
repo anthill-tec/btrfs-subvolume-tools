@@ -42,7 +42,8 @@ doc/configure-snapshots.8: doc/configure-snapshots.md
 doc/configure-snapshots.8.gz: doc/configure-snapshots.8
 	gzip -f doc/configure-snapshots.8
 
-test: all
+# Run tests independently without requiring man pages
+test:
 	@echo "Running tests (requires root privileges)..."
 	@if [ "$$(id -u)" -ne 0 ]; then \
 		echo "Please run: sudo make test"; \

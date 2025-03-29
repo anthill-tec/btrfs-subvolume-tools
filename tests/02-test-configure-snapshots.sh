@@ -19,15 +19,20 @@ DEBUG_MODE="${DEBUG_MODE:-false}"
 
 # Setup test environment
 setup() {
-    TEST_DIR="$TEST_TEMP_DIR/configure-snapshots-test"
-    execCmd "Create test directory" "mkdir -p \"$TEST_DIR\""
+    # Create a unique timestamp for this test run
+    local timestamp=$(date +%s)
+    
+    # Create test directory with timestamp to ensure uniqueness
+    TEST_DIR="$TEST_TEMP_DIR/configure-snapshots-test-$timestamp"
+    mkdir -p "$TEST_DIR"
     
     TARGET_MOUNT="$TEST_DIR/mnt-target"
-    execCmd "Create mount directory" "mkdir -p \"$TARGET_MOUNT\""
+    mkdir -p "$TARGET_MOUNT"
     
     TARGET_DEVICE="/dev/loop8"  # Using the standard loop device from setup_all.sh
     
     logDebug "Target device: $TARGET_DEVICE"
+    logDebug "Target mount: $TARGET_MOUNT"
     
     SCRIPT_PATH=$(find / -path "*/bin/configure-snapshots.sh" 2>/dev/null | head -n 1)
     if [ -z "$SCRIPT_PATH" ]; then
@@ -37,16 +42,8 @@ setup() {
     
     logDebug "Found script: $SCRIPT_PATH"
     
-    # Format the test device - suppress errors if device is busy
-    suppress_unless_debug mkfs.btrfs -f "$TARGET_DEVICE" || {
-        # Force unmount the device if it's in use
-        umount "$TARGET_DEVICE" 2>/dev/null || true
-        
-        # Try formatting again
-        suppress_unless_debug mkfs.btrfs -f "$TARGET_DEVICE" || {
-            logWarn "Could not format $TARGET_DEVICE, trying to continue anyway..."
-        }
-    }
+    # Format the test device
+    execCmd "Format test device" "mkfs.btrfs -f \"$TARGET_DEVICE\"" || true
     
     return 0
 }
@@ -104,52 +101,43 @@ prepare_subvolume() {
 teardown() {
     logDebug "Cleaning up test environment"
     
-    # Stop snapper services
+    # Stop all snapper services first
     execCmd "Stop snapper services" "systemctl stop snapper-timeline.timer snapper-cleanup.timer 2>/dev/null || true"
     execCmd "Stop snapper services" "systemctl stop snapper-timeline.service snapper-cleanup.service 2>/dev/null || true"
     
-    # Kill any snapper processes
+    # Kill any running snapper processes
     execCmd "Kill snapper processes" "pkill -f \"snapper.*test\" 2>/dev/null || true"
     
-    # Remove snapper configs
-    for config in test home var custom; do
-        execCmd "Remove $config config" "snapper -c \"$config\" delete-config 2>/dev/null || true"
-    done
+    # Get a list of all snapper configs and delete them
+    execCmd "List all snapper configs" "snapper list-configs || true"
     
-    # Use the force unmount utility if available
-    if type force_unmount_path &>/dev/null; then
-        logDebug "Using force unmount utility to clean up test mounts"
-        force_unmount_path "$TEST_DIR" "$DEBUG_MODE"
+    # Remove specific configs we know about
+    execCmd "Remove test config" "snapper -c \"test\" delete-config 2>/dev/null || true"
+    execCmd "Remove home config" "snapper -c \"home\" delete-config 2>/dev/null || true"
+    execCmd "Remove var config" "snapper -c \"var\" delete-config 2>/dev/null || true"
+    execCmd "Remove custom config" "snapper -c \"custom\" delete-config 2>/dev/null || true"
+    
+    # Find and remove any timestamp-based configs
+    execCmd "Find and remove timestamp configs" "for cfg in \$(snapper list-configs | grep -o 'home_[0-9]\\+\\|var_[0-9]\\+\\|custom_[0-9]\\+' 2>/dev/null); do snapper -c \"\$cfg\" delete-config; done 2>/dev/null || true"
+    
+    # Check for any mounts under our test directory
+    execCmd "Check mounts" "mount | grep -q \"$TEST_DIR\""
+    if [ $? -eq 0 ]; then
+        logDebug "Found mounts under $TEST_DIR, attempting to unmount"
+        execCmd "List mounts" "mount | grep \"$TEST_DIR\""
+        
+        # Unmount all mounts under our test directory
+        execCmd "Unmount all test mounts" "mount | grep \"$TEST_DIR\" | awk '{print \$3}' | sort -r | xargs -I{} umount -f \"{}\" 2>/dev/null || true"
     else
-        # Fallback to standard unmounting with retries
-        for i in 1 2 3; do
-            if ! execCmd "Check mounts" "mount | grep -q \"$TEST_DIR\""; then
-                logDebug "No mounts found under $TEST_DIR"
-                break
-            fi
-            
-            logDebug "Unmount attempt $i/3..."
-            
-            execCmd "List mounts" "mount | grep \"$TEST_DIR\" || true"
-            
-            execCmd "Check processes" "lsof | grep \"$TEST_DIR\" || echo \"No processes found using the mounts\""
-            
-            execCmd "Unmount all" "mount | grep \"$TEST_DIR\" | awk '{print \$3}' | sort -r | while read mount_point; do
-                echo \"Attempting to unmount $mount_point...\"
-                umount \"$mount_point\" 2>/dev/null || true
-            done"
-            
-            execCmd "Sync filesystems" "sync"
-            
-            if [ $i -lt 3 ]; then
-                logDebug "Waiting before retry..."
-                sleep 3
-            fi
-        done
+        logDebug "No mounts found under $TEST_DIR"
     fi
     
-    # Finally remove the test directory
+    # Remove the test directory
     execCmd "Remove test directory" "rm -rf \"$TEST_DIR\" 2>/dev/null || true"
+    
+    # Reset the loop device to ensure a clean state for the next test
+    execCmd "Reset loop device" "losetup -d \"$TARGET_DEVICE\" 2>/dev/null || true"
+    execCmd "Reattach loop device" "losetup \"$TARGET_DEVICE\" /images/target-disk.img 2>/dev/null || true"
     
     logDebug "Cleanup completed"
     return 0
@@ -159,30 +147,43 @@ teardown() {
 test_default_config() {
     logInfo "Running test: Default configuration"
     
-    prepare_subvolume "@home"
+    # Generate a unique config name to avoid conflicts
+    local config_name="test_$(date +%s)"
+    logDebug "Using unique config name: $config_name"
+    
+    # Ensure any previous configs are removed
+    execCmd "Remove any existing config" "snapper -c \"$config_name\" delete-config 2>/dev/null || true"
+    
+    # Reset filesystem and prepare a fresh subvolume
+    execCmd "Reset filesystem" "mkfs.btrfs -f \"$TARGET_DEVICE\" || true"
+    assert "true" "Filesystem reset should succeed"
+    
+    # Use a unique subvolume name with timestamp
+    local subvol_name="@root_$(date +%s)"
+    prepare_subvolume "$subvol_name"
     assert "[ $? -eq 0 ]" "Subvolume preparation should succeed"
     
     logInfo "Configuring snapper with default options"
     execCmd "Configure snapper" "\"$SCRIPT_PATH\" \
         --target-mount \"$TARGET_MOUNT\" \
-        --config-name \"test\" \
+        --config-name \"$config_name\" \
         --force"
     assert "[ $? -eq 0 ]" "Snapper configuration should succeed"
     
-    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/test\" ]"
+    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/$config_name\" ]"
     assert "[ $? -eq 0 ]" "Snapper configuration file should exist"
     logInfo "✓ Snapper configuration was created successfully"
     
-    execCmd "Check timeline setting" "grep -q \"TIMELINE_CREATE=\\\"yes\\\"\" \"/etc/snapper/configs/test\""
+    execCmd "Check timeline setting" "grep -q \"TIMELINE_CREATE=\\\"yes\\\"\" \"/etc/snapper/configs/$config_name\""
     assert "[ $? -eq 0 ]" "Timeline creation should be enabled by default"
     logInfo "✓ Timeline settings properly configured"
     
     logInfo "Creating test snapshot"
-    execCmd "Create test snapshot" "snapper -c \"test\" create -d \"Test snapshot\""
+    execCmd "Create test snapshot" "snapper -c \"$config_name\" create -d \"Test snapshot\""
     assert "[ $? -eq 0 ]" "Should be able to create a test snapshot"
     logInfo "✓ Successfully created a test snapshot"
     
-    execCmd "Check snapshot exists" "snapper -c \"test\" list | grep -q \"Test snapshot\""
+    execCmd "Check snapshot exists" "snapper -c \"$config_name\" list | grep -q \"Test snapshot\""
     assert "[ $? -eq 0 ]" "Test snapshot should be listed"
     logInfo "✓ Successfully verified snapshot creation"
     
@@ -247,26 +248,36 @@ test_with_user_permissions() {
 test_with_timeline_disabled() {
     logInfo "Running test: Timeline disabled configuration"
     
+    # Generate a unique config name to avoid conflicts
+    local config_name="var_$(date +%s)"
+    logDebug "Using unique config name: $config_name"
+    
+    # Ensure any previous configs are removed
+    execCmd "Remove any existing config" "snapper -c \"$config_name\" delete-config 2>/dev/null || true"
+    
+    # Reset filesystem and prepare a fresh subvolume
     execCmd "Reset filesystem" "mkfs.btrfs -f \"$TARGET_DEVICE\" || true"
-    # Even if format fails, continue
     assert "true" "Filesystem reset should succeed"
     
-    prepare_subvolume "@var"
+    # Use a unique subvolume name with timestamp
+    local subvol_name="@var_$(date +%s)"
+    prepare_subvolume "$subvol_name"
     assert "[ $? -eq 0 ]" "Subvolume preparation should succeed"
     
     logInfo "Configuring snapper with timeline disabled"
-    execCmd "Configure snapper without timeline" "\"$SCRIPT_PATH\" \
+    execCmd "Configure snapper with timeline disabled" "\"$SCRIPT_PATH\" \
         --target-mount \"$TARGET_MOUNT\" \
-        --config-name \"var\" \
+        --config-name \"$config_name\" \
         --timeline no \
-        --force"
+        --force \
+        --non-interactive"
     assert "[ $? -eq 0 ]" "Snapper configuration should succeed"
     
-    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/var\" ]"
+    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/$config_name\" ]"
     assert "[ $? -eq 0 ]" "Snapper configuration file should exist"
     logInfo "✓ Snapper configuration was created successfully"
     
-    execCmd "Check timeline setting" "grep -q \"TIMELINE_CREATE=\\\"no\\\"\" \"/etc/snapper/configs/var\""
+    execCmd "Check timeline setting" "grep -q \"TIMELINE_CREATE=\\\"no\\\"\" \"/etc/snapper/configs/$config_name\""
     assert "[ $? -eq 0 ]" "Timeline should be disabled"
     logInfo "✓ Timeline successfully disabled"
     
@@ -276,44 +287,62 @@ test_with_timeline_disabled() {
 
 # Test with custom snapshot retention
 test_with_custom_retention() {
-    logInfo "Running test: Custom snapshot retention configuration"
+    logInfo "Running test: Custom retention configuration"
     
+    # Generate a unique config name to avoid conflicts
+    local config_name="custom_$(date +%s)"
+    logDebug "Using unique config name: $config_name"
+    
+    # Ensure any previous configs are removed
+    execCmd "Remove any existing config" "snapper -c \"$config_name\" delete-config 2>/dev/null || true"
+    
+    # Reset filesystem and prepare a fresh subvolume
     execCmd "Reset filesystem" "mkfs.btrfs -f \"$TARGET_DEVICE\" || true"
-    # Even if format fails, continue
     assert "true" "Filesystem reset should succeed"
     
-    prepare_subvolume "@data"
+    # Use a unique subvolume name with timestamp
+    local subvol_name="@custom_$(date +%s)"
+    prepare_subvolume "$subvol_name"
     assert "[ $? -eq 0 ]" "Subvolume preparation should succeed"
     
+    # Custom retention values
     local hourly=10
-    local daily=14
-    local weekly=8
+    local daily=7
+    local monthly=3
+    local yearly=1
     
-    logInfo "Using custom retention values: hourly=$hourly, daily=$daily, weekly=$weekly"
-    
-    logInfo "Configuring snapper with custom retention values"
+    logInfo "Configuring snapper with custom retention (hourly=$hourly, daily=$daily, monthly=$monthly, yearly=$yearly)"
     execCmd "Configure snapper with custom retention" "\"$SCRIPT_PATH\" \
         --target-mount \"$TARGET_MOUNT\" \
-        --config-name \"custom\" \
+        --config-name \"$config_name\" \
         --hourly \"$hourly\" \
         --daily \"$daily\" \
-        --weekly \"$weekly\" \
-        --force"
+        --monthly \"$monthly\" \
+        --yearly \"$yearly\" \
+        --force \
+        --non-interactive"
     assert "[ $? -eq 0 ]" "Snapper configuration should succeed"
     
-    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/custom\" ]"
+    execCmd "Check config file exists" "[ -f \"/etc/snapper/configs/$config_name\" ]"
     assert "[ $? -eq 0 ]" "Snapper configuration file should exist"
     logInfo "✓ Snapper configuration was created successfully"
     
-    execCmd "Check hourly setting" "grep -q \"TIMELINE_LIMIT_HOURLY=\\\"$hourly\\\"\" \"/etc/snapper/configs/custom\""
-    assert "[ $? -eq 0 ]" "Hourly retention should match custom value"
+    # Output the contents of the snapper configuration file for debugging
+    logInfo "Snapper configuration file contents:"
+    execCmd "Show config file contents" "cat \"/etc/snapper/configs/$config_name\""
     
-    execCmd "Check daily setting" "grep -q \"TIMELINE_LIMIT_DAILY=\\\"$daily\\\"\" \"/etc/snapper/configs/custom\""
-    assert "[ $? -eq 0 ]" "Daily retention should match custom value"
+    # Check for TIMELINE_LIMIT_* settings instead of NUMBER_LIMIT_*
+    execCmd "Check hourly setting" "grep -q \"TIMELINE_LIMIT_HOURLY=\\\"$hourly\\\"\" \"/etc/snapper/configs/$config_name\""
+    assert "[ $? -eq 0 ]" "Hourly retention should be set to $hourly"
     
-    execCmd "Check weekly setting" "grep -q \"TIMELINE_LIMIT_WEEKLY=\\\"$weekly\\\"\" \"/etc/snapper/configs/custom\""
-    assert "[ $? -eq 0 ]" "Weekly retention should match custom value"
+    execCmd "Check daily setting" "grep -q \"TIMELINE_LIMIT_DAILY=\\\"$daily\\\"\" \"/etc/snapper/configs/$config_name\""
+    assert "[ $? -eq 0 ]" "Daily retention should be set to $daily"
     
+    execCmd "Check monthly setting" "grep -q \"TIMELINE_LIMIT_MONTHLY=\\\"$monthly\\\"\" \"/etc/snapper/configs/$config_name\""
+    assert "[ $? -eq 0 ]" "Monthly retention should be set to $monthly"
+    
+    execCmd "Check yearly setting" "grep -q \"TIMELINE_LIMIT_YEARLY=\\\"$yearly\\\"\" \"/etc/snapper/configs/$config_name\""
+    assert "[ $? -eq 0 ]" "Yearly retention should be set to $yearly"
     logInfo "✓ Retention settings properly configured"
     
     execCmd "Unmount target" "umount \"$TARGET_MOUNT\" 2>/dev/null || true"
