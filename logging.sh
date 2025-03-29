@@ -155,8 +155,15 @@ EOF
             # In debug mode, show all output
             eval "$command" 2>&1 | tee -a "$log_file"
         elif [ "$phase" = "4" ]; then
-            # For test execution phase, show output even in normal mode
-            eval "$command" 2>&1 | tee -a "$log_file"
+            # For test execution phase in normal mode, only show output for specific commands
+            # This reduces verbosity while still showing important test results
+            if [[ "$cmd_desc" == *"Running tests in container with"* ]]; then
+                # Show output for the actual test run
+                eval "$command" 2>&1 | tee -a "$log_file"
+            else
+                # For other phase 4 commands, just log without showing output
+                eval "$command" >> "$log_file" 2>&1
+            fi
         else
             # For other phases in normal mode, only log, don't show
             eval "$command" >> "$log_file" 2>&1
