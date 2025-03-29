@@ -38,9 +38,6 @@ test_init() {
     PASSED_ASSERTIONS=0
     FAILED_ASSERTIONS=0
     
-    # Increment total test count
-    TOTAL_TESTS=$((TOTAL_TESTS + 1))
-    
     # Output test header
     if [ "$DEBUG" = "true" ]; then
         echo -e "\n${BLUE}============================================${NC}"
@@ -49,8 +46,6 @@ test_init() {
     else
         echo -e "\n${BLUE}▶ TEST: $test_name${NC}"
     fi
-    
-    return 0
 }
 
 # Log message at DEBUG level
@@ -274,7 +269,10 @@ process_test_file() {
     # Find all test_* functions in the file
     TEST_FUNCTIONS=()
     for FUNC in $(declare -F | awk '{print $3}' | grep -E '^test_'); do
-        TEST_FUNCTIONS+=("$FUNC")
+        # Skip utility functions that are not actual tests
+        if [[ "$FUNC" != "test_init" && "$FUNC" != "test_finish" ]]; then
+            TEST_FUNCTIONS+=("$FUNC")
+        fi
     done
     
     # If no test_* functions found, try to run the run_test function
