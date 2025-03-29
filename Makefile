@@ -4,7 +4,7 @@ PREFIX ?= /usr/local
 BINDIR = $(PREFIX)/bin
 MANDIR = $(PREFIX)/share/man
 DOCDIR = $(PREFIX)/share/doc/btrfs-subvolume-tools
-PROJECT_NAME ?= BTRFS Subvolume Tools
+PROJECT_NAME = "BTRFS Subvolume Tools"
 
 .PHONY: all install uninstall man clean test test-clean
 
@@ -48,7 +48,7 @@ test:
 		echo "Please run: sudo make test"; \
 		exit 1; \
 	fi
-	@PROJECT_NAME="$(PROJECT_NAME)" ./install.sh --test
+	@./install.sh --test --project-name=$(PROJECT_NAME)
 
 debug-test:
 	@echo "Running tests in debug mode (requires root privileges)..."
@@ -56,7 +56,7 @@ debug-test:
 		echo "Please run: sudo make debug-test"; \
 		exit 1; \
 	fi
-	@DEBUG=true PROJECT_NAME="$(PROJECT_NAME)" ./install.sh --test --debug
+	@DEBUG=true ./install.sh --test --debug --project-name=$(PROJECT_NAME)
 
 test-clean:
 	@echo "Cleaning up test environment..."

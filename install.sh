@@ -37,6 +37,7 @@ show_help() {
     echo "  --test-case=FUNC   Run a specific test case function"
     echo "  --prefix=PATH    Install to PATH instead of /usr/local"
     echo "  --debug          Enable debug mode"
+    echo "  --project-name=NAME Set the project name"
     echo ""
     echo "Examples:"
     echo "  $0 --test-suite=configure-snapshots"
@@ -454,9 +455,9 @@ run_tests() {
         debug_arg=""
     fi
     
-    # Execute the command with the debug flag if needed
+    # Execute the command with the debug flag if needed and pass PROJECT_NAME
     run_cmd 4 "Running tests in container with /bin/bash" \
-        "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && ./test-bootstrap.sh $debug_arg ${specific_test:-} ${specific_test_case:-}'"
+        "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && PROJECT_NAME=\"$PROJECT_NAME\" ./test-bootstrap.sh $debug_arg ${specific_test:-} ${specific_test_case:-}'"
     
     # Get test exit code
     TEST_RESULT=$?
@@ -530,6 +531,9 @@ main() {
         TEST_CASE=""
         SKIP_DEPS="false"
         
+        # Set default PROJECT_NAME if not already set in environment
+        PROJECT_NAME="${PROJECT_NAME:-Project}"
+        
         # Explicitly check for DEBUG in the environment and set it if not already set
         # This ensures DEBUG is properly set even if sudo doesn't preserve it
         if [ "$DEBUG" != "true" ]; then
@@ -563,6 +567,11 @@ main() {
                 --debug)
                     export DEBUG=true
                     echo "Debug mode enabled via --debug flag"
+                    shift
+                    ;;
+                --project-name=*)
+                    export PROJECT_NAME="${1#*=}"
+                    echo "Project name set to: $PROJECT_NAME"
                     shift
                     ;;
                 --test-suite=*)
