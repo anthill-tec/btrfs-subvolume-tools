@@ -200,7 +200,7 @@ finalize_logs() {
     cat >> "$LOG_DIR/00_summary.log" << EOF
 
 ==================================================
-  Test Session Results
+  Test Suite Results
 --------------------------------------------------
   Result: $([ "$result" -eq 0 ] && echo "SUCCESS" || echo "FAILURE")
   Exit Code: $result
@@ -214,7 +214,7 @@ EOF
     # Always show this summary information regardless of debug mode
     echo ""
     echo -e "${BOLD}====================================================${NC}"
-    echo -e "${BOLD}  Test Session Results${NC}"
+    echo -e "${BOLD}  Test Suite Results${NC}"
     echo -e "${BOLD}----------------------------------------------------${NC}"
     if [ "$result" -eq 0 ]; then
         echo -e "  Result: ${GREEN}SUCCESS${NC}"
