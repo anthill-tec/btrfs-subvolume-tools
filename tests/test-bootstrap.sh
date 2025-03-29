@@ -5,11 +5,29 @@
 # 2. Exporting functions to make them available in subshells
 # 3. Running the test runner with provided arguments
 
+# Default environment variables
+export DEBUG="${DEBUG:-false}"
+export PROJECT_NAME="${PROJECT_NAME:-Project}"
+
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug)
+            export DEBUG="true"
+            shift
+            ;;
+        *)
+            # Store remaining arguments for the test runner
+            break
+            ;;
+    esac
+done
+
 # Get the directory of this script
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Debug output to verify environment variables
-echo "DEBUG_MODE value in bootstrap: ${DEBUG_MODE:-not set}"
+echo "DEBUG value in bootstrap: ${DEBUG:-not set}"
 
 # Source the test utilities
 if [ -f "$SCRIPT_DIR/test-utils.sh" ]; then

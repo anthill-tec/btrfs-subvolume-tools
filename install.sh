@@ -308,65 +308,11 @@ run_tests() {
     run_cmd 2 "Copying bin scripts to container" "mkdir -p tests/container/rootfs/root/bin"
     run_cmd 2 "Copying scripts" "cp -rv $SCRIPT_DIR/bin/* tests/container/rootfs/root/bin/"
     
-    # Copy test scripts directly to container without temporary files
-    run_cmd 2 "Copying test-runner script" "cp -v $SCRIPT_DIR/tests/test-runner.sh tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
-    run_cmd 2 "Copying test-utils script" "cp -v $SCRIPT_DIR/tests/test-utils.sh tests/container/rootfs/root/test-utils.sh && chmod +x tests/container/rootfs/root/test-utils.sh"
+    # Copy test scripts and utilities
+    run_cmd 2 "Copying test runner" "cp -v $SCRIPT_DIR/tests/test-runner.sh tests/container/rootfs/root/test-runner.sh && chmod +x tests/container/rootfs/root/test-runner.sh"
+    run_cmd 2 "Copying test utilities" "cp -v $SCRIPT_DIR/tests/test-utils.sh tests/container/rootfs/root/test-utils.sh"
+    run_cmd 2 "Copying bootstrap script" "cp -v $SCRIPT_DIR/tests/test-bootstrap.sh tests/container/rootfs/root/test-bootstrap.sh && chmod +x tests/container/rootfs/root/test-bootstrap.sh"
     run_cmd 2 "Copying global hooks" "cp -v $SCRIPT_DIR/tests/global-hooks.sh tests/container/rootfs/root/global-hooks.sh"
-    
-    # Create a dynamically generated bootstrap script with environment variables included
-    cat > tests/container/rootfs/root/test-bootstrap.sh << EOF
-#!/bin/bash
-# Test Bootstrap Script - Dynamically generated with environment variables
-# This script initializes the test environment by:
-# 1. Loading test utilities and functions
-# 2. Exporting functions to make them available in subshells
-# 3. Running the test runner with provided arguments
-
-# Default environment variables
-export DEBUG="false"
-export PROJECT_NAME="${PROJECT_NAME:-Project}"
-
-# Parse command line arguments
-while [[ \$# -gt 0 ]]; do
-    case \$1 in
-        --debug)
-            export DEBUG="true"
-            shift
-            ;;
-        *)
-            # Store remaining arguments for the test runner
-            break
-            ;;
-    esac
-done
-
-# Get the directory of this script
-SCRIPT_DIR="\$(cd "\$(dirname "\$0")" && pwd)"
-
-# Source the test utilities
-if [ -f "\$SCRIPT_DIR/test-utils.sh" ]; then
-    echo "Sourcing test utilities from \$SCRIPT_DIR/test-utils.sh"
-    # Use the dot operator instead of source for better compatibility
-    . "\$SCRIPT_DIR/test-utils.sh"
-else
-    echo "Error: test-utils.sh not found in \$SCRIPT_DIR"
-    exit 1
-fi
-
-# Source global hooks if available
-if [ -f "\$SCRIPT_DIR/global-hooks.sh" ]; then
-    echo "Sourcing global hooks from \$SCRIPT_DIR/global-hooks.sh"
-    . "\$SCRIPT_DIR/global-hooks.sh"
-fi
-
-# Export all test utility functions
-export -f test_init test_finish assert assertEquals assertFileExists assertDirExists assertCmd
-
-# Run the test runner with any provided arguments
-echo "Running test runner with arguments: \$@"
-./test-runner.sh \$@
-EOF
-    run_cmd 2 "Setting bootstrap script permissions" "chmod +x tests/container/rootfs/root/test-bootstrap.sh"
     
     # Copy all test scripts generically
     run_cmd 2 "Copying all test scripts" "find tests/ -maxdepth 1 -name '*test*.sh' -not -name 'test-runner.sh' -not -name 'test-bootstrap.sh' | xargs -I{} cp -v {} tests/container/rootfs/root/ && chmod +x tests/container/rootfs/root/*test*.sh"
