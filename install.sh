@@ -427,8 +427,8 @@ EOF
     log_phase 4 "Starting test execution phase"
     
     # Create a file to capture test output
-    TEST_OUTPUT_FILE="$LOG_DIR/test_output.txt"
-    > "$TEST_OUTPUT_FILE"
+    # TEST_OUTPUT_FILE="$LOG_DIR/test_output.txt"
+    # > "$TEST_OUTPUT_FILE"
 
     # Clear visual separation before starting tests
     if [ "$DEBUG_MODE" != "true" ]; then
@@ -477,9 +477,18 @@ EOF
     TEST_RESULT=$?
 
     # Check if tests reported failures
-    if grep -q "Some tests failed" "$TEST_OUTPUT_FILE"; then
-        log_phase 4 "Test script reported failures"
-        TEST_RESULT=1
+    if [ "$DEBUG_MODE" = "true" ]; then
+        # In debug mode, check the detailed log file
+        if grep -q "Some tests failed" "$LOG_DIR/04_test_execution.log" 2>/dev/null; then
+            log_phase 4 "Test script reported failures"
+            TEST_RESULT=1
+        fi
+    else
+        # In normal mode, check the test_output.log file
+        if grep -q "Some tests failed" "$LOG_DIR/test_output.log" 2>/dev/null; then
+            log_phase 4 "Test script reported failures"
+            TEST_RESULT=1
+        fi
     fi
     
     # Phase 5: Cleanup and results
