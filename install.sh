@@ -53,7 +53,7 @@ show_help() {
 do_install() {
     local prefix="$1"
     
-    echo "Installing btrfs-subvolume-tools to $prefix"
+    log_phase 1 "Installing btrfs-subvolume-tools to $prefix"
 
     # Create directories if they don't exist
     mkdir -p "$prefix/bin"
@@ -169,21 +169,21 @@ run_tests() {
     local SPECIFIC_TEST="${2:-}"
     local SPECIFIC_TEST_CASE="${3:-}"
     
-    echo "Running tests with machinectl..."
+    log_phase 1 "Running tests with machinectl..."
     
     # Check if we have root privileges
     if [ "$EUID" -ne 0 ]; then
-        echo "Error: Tests must be run with root privileges"
-        echo "Please run: sudo $0 --test"
+        log_phase 1 "Error: Tests must be run with root privileges"
+        log_phase 1 "Please run: sudo $0 --test"
         exit 1
     fi
     
     # Clean up function declarations
     early_cleanup() {
-        echo "Performing early cleanup..."
+        log_phase 1 "Performing early cleanup..."
         # Clean up any existing containers with btrfs-test prefix
         machinectl list | grep "btrfs-test-" | awk '{print $1}' | while read machine; do
-            echo "Cleaning up existing container: $machine"
+            log_phase 1 "Cleaning up existing container: $machine"
             machinectl terminate "$machine" 2>/dev/null || true
             machinectl remove "$machine" 2>/dev/null || true
         done
@@ -192,7 +192,7 @@ run_tests() {
     }
     
     cleanup() {
-        echo "Cleaning up test environment..."
+        log_phase 1 "Cleaning up test environment..."
         # Only try to clean up the container if we have a name
         if [ -n "$CONTAINER_NAME" ]; then
             log_phase 5 "Terminating container $CONTAINER_NAME"
@@ -432,9 +432,9 @@ EOF
 
     # Clear visual separation before starting tests
     if [ "$DEBUG_MODE" != "true" ]; then
-        echo ""
-        echo -e "${BLUE}=============== RUNNING TESTS ===============${NC}"
-        echo ""
+        log_phase 4 ""
+        log_phase 4 "=============== RUNNING TESTS ==============="
+        log_phase 4 ""
     fi
     
     # Run tests in the container
@@ -454,6 +454,7 @@ EOF
     run_cmd 4 "Checking loop device availability" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'ls -la /dev/loop* || echo \"No loop devices found\"'"
     run_cmd 4 "Checking loop_devices.conf" "machinectl shell \"$CONTAINER_NAME\" /bin/sh -c 'cat /loop_devices.conf || echo \"No loop_devices.conf found\"'"
     
+    # Export DEBUG_MODE and PROJECT_NAME to ensure they're available in the container
     DEBUG_PARAM=""
     if [ "$DEBUG_MODE" = "true" ]; then
         DEBUG_PARAM="DEBUG_MODE=true"
@@ -462,17 +463,18 @@ EOF
     fi
 
     # Execute the test runner
+    log_phase 4 "Starting test execution phase"
     if [ "$DEBUG_MODE" = "true" ]; then
         # In debug mode, show output in real-time
         run_cmd 4 "Running tests in container with /bin/bash" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
+            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && export $DEBUG_PARAM && export PROJECT_NAME=\"${PROJECT_NAME:-Project}\" && /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
         # Copy the log file to TEST_OUTPUT_FILE
         cp "$LOG_DIR/04_test_execution.log" "$TEST_OUTPUT_FILE"
     else
         # In normal mode, show only the test output
         echo -e "\n${BLUE}=============== TEST OUTPUT ===============${NC}"
         run_cmd 4 "Running tests in container with /bin/bash" \
-            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && $DEBUG_PARAM PROJECT_NAME=\"${PROJECT_NAME:-BTRFS Subvolume Tools}\" /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
+            "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && export $DEBUG_PARAM && export PROJECT_NAME=\"${PROJECT_NAME:-Project}\" && /bin/bash ./test-bootstrap.sh ${SPECIFIC_TEST:-} ${SPECIFIC_TEST_CASE:-}'"
         # Copy the log file to TEST_OUTPUT_FILE
         cp "$LOG_DIR/04_test_execution.log" "$TEST_OUTPUT_FILE"
         echo -e "${BLUE}==========================================${NC}\n"
@@ -509,7 +511,7 @@ EOF
     finalize_logs $TEST_RESULT "$TEST_DURATION"
     
     # Display test location to user
-    echo "Test logs saved to: $LOG_DIR"
+    log_phase 5 "Test logs saved to: $LOG_DIR"
     
     return $TEST_RESULT
 }
@@ -563,12 +565,12 @@ main() {
     # Either install or run tests
     if [ "$TEST_MODE" = true ]; then
         if ! run_tests "$DEBUG_MODE" "$SPECIFIC_TEST" "$SPECIFIC_TEST_CASE"; then
-            echo "Tests failed or encountered an error."
+            log_phase 1 "Tests failed or encountered an error."
             exit 1
         fi
     elif [ "$INSTALL_MODE" = true ]; then
         if ! do_install "$PREFIX"; then
-            echo "Installation failed."
+            log_phase 1 "Installation failed."
             exit 1
         fi
     fi

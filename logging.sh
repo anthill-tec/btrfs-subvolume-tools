@@ -39,12 +39,18 @@ init_logging() {
 
 EOF
     
-    # Create empty phase log files
-    touch "$LOG_DIR/01_pre_installation.log"
-    touch "$LOG_DIR/02_tool_setup.log"
-    touch "$LOG_DIR/03_test_configuration.log"
-    touch "$LOG_DIR/04_test_execution.log"
-    touch "$LOG_DIR/05_cleanup_results.log"
+    # Create log files based on debug mode
+    if [ "$DEBUG_MODE" = "true" ]; then
+        # Detailed logs for DEBUG mode
+        touch "$LOG_DIR/01_pre_installation.log"
+        touch "$LOG_DIR/02_tool_setup.log"
+        touch "$LOG_DIR/03_test_configuration.log"
+        touch "$LOG_DIR/04_test_execution.log"
+        touch "$LOG_DIR/05_cleanup_results.log"
+    else
+        # In normal mode, just create a single test output file besides summary
+        touch "$LOG_DIR/test_output.log"
+    fi
     
     # Return the log directory
     echo "$LOG_DIR"
@@ -57,17 +63,23 @@ log_phase() {
     
     # Map phase number to log file
     local log_file
-    case "$phase" in
-        1) log_file="$LOG_DIR/01_pre_installation.log" ;;
-        2) log_file="$LOG_DIR/02_tool_setup.log" ;;
-        3) log_file="$LOG_DIR/03_test_configuration.log" ;;
-        4) log_file="$LOG_DIR/04_test_execution.log" ;;
-        5) log_file="$LOG_DIR/05_cleanup_results.log" ;;
-        *)
-            echo "Invalid phase number: $phase"
-            return 1
-            ;;
-    esac
+    if [ "$DEBUG_MODE" = "true" ]; then
+        # Detailed logging in debug mode
+        case "$phase" in
+            1) log_file="$LOG_DIR/01_pre_installation.log" ;;
+            2) log_file="$LOG_DIR/02_tool_setup.log" ;;
+            3) log_file="$LOG_DIR/03_test_configuration.log" ;;
+            4) log_file="$LOG_DIR/04_test_execution.log" ;;
+            5) log_file="$LOG_DIR/05_cleanup_results.log" ;;
+            *)
+                echo "Invalid phase number: $phase"
+                return 1
+                ;;
+        esac
+    else
+        # In normal mode, log everything to the test_output file
+        log_file="$LOG_DIR/test_output.log"
+    fi
     
     # Append message to the phase log
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "$log_file"
@@ -92,17 +104,23 @@ run_cmd() {
     
     # Map phase number to log file
     local log_file
-    case "$phase" in
-        1) log_file="$LOG_DIR/01_pre_installation.log" ;;
-        2) log_file="$LOG_DIR/02_tool_setup.log" ;;
-        3) log_file="$LOG_DIR/03_test_configuration.log" ;;
-        4) log_file="$LOG_DIR/04_test_execution.log" ;;
-        5) log_file="$LOG_DIR/05_cleanup_results.log" ;;
-        *)
-            echo "Invalid phase number: $phase"
-            return 1
-            ;;
-    esac
+    if [ "$DEBUG_MODE" = "true" ]; then
+        # Detailed logging in debug mode
+        case "$phase" in
+            1) log_file="$LOG_DIR/01_pre_installation.log" ;;
+            2) log_file="$LOG_DIR/02_tool_setup.log" ;;
+            3) log_file="$LOG_DIR/03_test_configuration.log" ;;
+            4) log_file="$LOG_DIR/04_test_execution.log" ;;
+            5) log_file="$LOG_DIR/05_cleanup_results.log" ;;
+            *)
+                echo "Invalid phase number: $phase"
+                return 1
+                ;;
+        esac
+    else
+        # In normal mode, log everything to the test_output file
+        log_file="$LOG_DIR/test_output.log"
+    fi
     
     # Create a clear command block header in the log
     cat >> "$log_file" << EOF
@@ -180,6 +198,8 @@ EOF
         echo "Tests failed. For more detailed output, run with DEBUG_MODE=true:"
         echo "  DEBUG_MODE=true sudo make test"
         echo "Full logs are available at: $LOG_DIR"
+    else
+        echo "Test logs saved to: $LOG_DIR"
     fi
 }
 
