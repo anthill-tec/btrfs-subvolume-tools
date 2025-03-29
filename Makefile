@@ -6,7 +6,7 @@ MANDIR = $(PREFIX)/share/man
 DOCDIR = $(PREFIX)/share/doc/btrfs-subvolume-tools
 PROJECT_NAME = "BTRFS Subvolume Tools"
 
-.PHONY: all install uninstall man clean test test-clean
+.PHONY: all install uninstall man clean test test-clean test-only
 
 all: man
 
@@ -42,13 +42,22 @@ doc/configure-snapshots.8: doc/configure-snapshots.md
 doc/configure-snapshots.8.gz: doc/configure-snapshots.8
 	gzip -f doc/configure-snapshots.8
 
-test:
+test: all
 	@echo "Running tests (requires root privileges)..."
 	@if [ "$$(id -u)" -ne 0 ]; then \
 		echo "Please run: sudo make test"; \
 		exit 1; \
 	fi
-	@./install.sh --test --project-name=$(PROJECT_NAME)
+	@./install.sh --test --project-name=$(PROJECT_NAME) $(if $(debug),--debug,) $(if $(test-suite),--test-suite=$(test-suite),) $(if $(test-case),--test-case=$(test-case),)
+
+# Run tests without requiring man pages
+test-only:
+	@echo "Running tests without building man pages (requires root privileges)..."
+	@if [ "$$(id -u)" -ne 0 ]; then \
+		echo "Please run: sudo make test-only"; \
+		exit 1; \
+	fi
+	@./install.sh --test --project-name=$(PROJECT_NAME) $(if $(debug),--debug,) $(if $(test-suite),--test-suite=$(test-suite),) $(if $(test-case),--test-case=$(test-case),)
 
 debug-test:
 	@echo "Running tests in debug mode (requires root privileges)..."
