@@ -6,15 +6,19 @@
 # Global log directory
 LOG_DIR=""
 
-# Color output
+# Define color codes for better visibility
+# Make sure to use -e with echo to interpret these escape sequences
 RED="\033[0;31m"
 GREEN="\033[0;32m"
-YELLOW="\033[1;33m"
+YELLOW="\033[0;33m"
 BLUE="\033[0;34m"
+PURPLE="\033[0;35m"
 CYAN="\033[0;36m"
-MAGENTA="\033[0;35m"
 BOLD="\033[1m"
 NC="\033[0m" # No Color
+
+# Force color output even when output is not a terminal
+export FORCE_COLOR=true
 
 # Debug mode flag - can be set from the environment
 export DEBUG=${DEBUG:-false}
@@ -63,6 +67,18 @@ log_phase() {
     
     # Map phase number to log file
     local log_file
+    local phase_color
+    
+    # Set color for each phase
+    case "$phase" in
+        1) phase_color="${CYAN}" ;;
+        2) phase_color="${GREEN}" ;;
+        3) phase_color="${YELLOW}" ;;
+        4) phase_color="${BLUE}" ;;
+        5) phase_color="${PURPLE}" ;;
+        *) phase_color="${BOLD}" ;;
+    esac
+    
     if [ "$DEBUG" = "true" ]; then
         # Detailed logging in debug mode
         case "$phase" in
@@ -89,7 +105,7 @@ log_phase() {
     
     # Print to console only in debug mode or if in test execution phase
     if [ "$DEBUG" = "true" ] || [ "$phase" = "4" ]; then
-        echo "Phase $phase: $message"
+        echo -e "${phase_color}Phase $phase:${NC} $message"
     fi
 }
 
@@ -164,14 +180,14 @@ EOF
 
 # Finalize the logs with a summary
 finalize_logs() {
-    local result="$1"
-    local duration="$2"
+    local result=$1
+    local duration=$2
     
-    # Add the summary footer
+    # Add a summary to the log file
     cat >> "$LOG_DIR/00_summary.log" << EOF
 
 ==================================================
-  Test Results
+  Test Session Results
 --------------------------------------------------
   Result: $([ "$result" -eq 0 ] && echo "SUCCESS" || echo "FAILURE")
   Exit Code: $result
@@ -184,22 +200,26 @@ EOF
 
     # Always show this summary information regardless of debug mode
     echo ""
-    echo "===================================================="
-    echo "  Test Results"
-    echo "----------------------------------------------------"
-    echo "  Result: $([ "$result" -eq 0 ] && echo "SUCCESS" || echo "FAILURE")"
-    echo "  Exit Code: $result"
-    echo "  Duration: $duration seconds"
-    echo "  Completed: $(date '+%Y-%m-%d %H:%M:%S')"
-    echo "===================================================="
+    echo -e "${BOLD}====================================================${NC}"
+    echo -e "${BOLD}  Test Session Results${NC}"
+    echo -e "${BOLD}----------------------------------------------------${NC}"
+    if [ "$result" -eq 0 ]; then
+        echo -e "  Result: ${GREEN}SUCCESS${NC}"
+    else
+        echo -e "  Result: ${RED}FAILURE${NC}"
+    fi
+    echo -e "  Exit Code: $result"
+    echo -e "  Duration: $duration seconds"
+    echo -e "  Completed: $(date '+%Y-%m-%d %H:%M:%S')"
+    echo -e "${BOLD}====================================================${NC}"
     
     # If there was a failure and we're not in debug mode, suggest enabling debug mode
     if [ "$result" -ne 0 ] && [ "$DEBUG" != "true" ]; then
-        echo "Tests failed. For more detailed output, run with DEBUG=true:"
-        echo "  DEBUG=true sudo make test"
-        echo "Full logs are available at: $LOG_DIR"
+        echo -e "${YELLOW}Tests failed. For more detailed output, run with DEBUG=true:${NC}"
+        echo -e "  ${BOLD}DEBUG=true sudo make test${NC}"
+        echo -e "Full logs are available at: ${BLUE}$LOG_DIR${NC}"
     else
-        echo "Test logs saved to: $LOG_DIR"
+        echo -e "Test logs saved to: ${BLUE}$LOG_DIR${NC}"
     fi
 }
 
