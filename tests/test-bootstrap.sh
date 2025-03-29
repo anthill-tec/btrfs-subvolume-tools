@@ -29,6 +29,40 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 # Debug output to verify environment variables
 echo "DEBUG value in bootstrap: ${DEBUG:-not set}"
 
+# Enable systemd services required for tests
+if command -v systemctl >/dev/null 2>&1; then
+    # Enable systemd-networkd and systemd-resolved for proper networking
+    systemctl enable systemd-networkd >/dev/null 2>&1 || true
+    systemctl start systemd-networkd >/dev/null 2>&1 || true
+    
+    # Pre-enable snapper systemd timers to avoid failures during tests
+    if [ -f /usr/lib/systemd/system/snapper-timeline.timer ]; then
+        # Create necessary directories for systemd timers
+        mkdir -p /etc/systemd/system/snapper-timeline.timer.d
+        mkdir -p /etc/systemd/system/snapper-cleanup.timer.d
+        
+        # Create override files to make systemd happy in the container
+        cat > /etc/systemd/system/snapper-timeline.timer.d/override.conf << EOF
+[Unit]
+ConditionPathExists=/
+[Service]
+Type=simple
+EOF
+        
+        cat > /etc/systemd/system/snapper-cleanup.timer.d/override.conf << EOF
+[Unit]
+ConditionPathExists=/
+[Service]
+Type=simple
+EOF
+        
+        # Enable the timers but don't fail if it doesn't work
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl enable snapper-timeline.timer >/dev/null 2>&1 || true
+        systemctl enable snapper-cleanup.timer >/dev/null 2>&1 || true
+    fi
+fi
+
 # Source the test utilities
 if [ -f "$SCRIPT_DIR/test-utils.sh" ]; then
     echo "Sourcing test utilities from $SCRIPT_DIR/test-utils.sh"
