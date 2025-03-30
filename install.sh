@@ -22,6 +22,63 @@ if command -v logger >/dev/null 2>&1; then
     HAS_SYSLOG=true
 fi
 
+# Detect Linux distribution
+detect_distribution() {
+    # Initialize with unknown values
+    DISTRO_NAME="Unknown"
+    DISTRO_ID="unknown"
+    DISTRO_VERSION=""
+    DISTRO_BASE=""
+    
+    # First check for os-release which most modern distros have
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO_NAME="$NAME"
+        DISTRO_ID="$ID"
+        DISTRO_VERSION="$VERSION_ID"
+        
+        # Check for ID_LIKE to determine base distribution
+        if [ -n "$ID_LIKE" ]; then
+            # Check if it's Arch-based
+            if [[ "$ID_LIKE" == *"arch"* ]]; then
+                DISTRO_BASE="arch"
+            # Check if it's Debian-based
+            elif [[ "$ID_LIKE" == *"debian"* ]]; then
+                DISTRO_BASE="debian"
+            fi
+        fi
+    fi
+    
+    # If we couldn't determine the base, try more specific checks
+    if [ -z "$DISTRO_BASE" ]; then
+        # Check for Arch Linux and derivatives
+        if [ -f /etc/arch-release ] || command -v pacman >/dev/null 2>&1; then
+            DISTRO_BASE="arch"
+            # If we didn't get the name from os-release, set it here
+            if [ "$DISTRO_NAME" = "Unknown" ]; then
+                DISTRO_NAME="Arch Linux"
+                DISTRO_ID="arch"
+            fi
+        # Check for Debian and derivatives
+        elif [ -f /etc/debian_version ]; then
+            DISTRO_BASE="debian"
+            if [ "$DISTRO_NAME" = "Unknown" ]; then
+                DISTRO_NAME="Debian"
+                DISTRO_ID="debian"
+                DISTRO_VERSION=$(cat /etc/debian_version)
+            fi
+        fi
+    fi
+    
+    # Log the detected distribution
+    if [ "$DEBUG" = "true" ]; then
+        echo "Detected distribution: $DISTRO_NAME ($DISTRO_ID) version $DISTRO_VERSION"
+        echo "Base distribution: $DISTRO_BASE"
+    fi
+    
+    return 0
+}
+
 # Source the logging functions
 if [ -f "$SCRIPT_DIR/logging.sh" ]; then
     source "$SCRIPT_DIR/logging.sh"
@@ -112,8 +169,10 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  --help           Show this help message"
-    echo "  --prefix=PATH    Install to PATH instead of /usr/local"
     echo "  --debug          Enable debug mode"
+    echo "  --prefix=PATH    Install to PATH instead of /usr/local"
+    echo "  --package        Create a package for your distribution instead of installing"
+    echo "  --create-pkgfiles Generate packaging files for your distribution"
     echo ""
     echo "Installation will place files in:"
     echo "  <prefix>/bin                     - Executable scripts"
@@ -122,16 +181,206 @@ show_help() {
     echo ""
 }
 
+# Suggest native packaging based on distribution
+suggest_native_packaging() {
+    detect_distribution
+    
+    echo ""
+    echo "==============================================================="
+    echo "  Distribution detected: $DISTRO_NAME"
+    if [ "$DISTRO_BASE" != "$DISTRO_ID" ] && [ -n "$DISTRO_BASE" ]; then
+        echo "  Base distribution: $DISTRO_BASE"
+    fi
+    echo "==============================================================="
+    echo ""
+    
+    case "$DISTRO_BASE" in
+        arch)
+            echo "For Arch-based distributions, you can use the PKGBUILD:"
+            echo ""
+            echo "  # Option 1: Use the Makefile target (recommended)"
+            echo "  make pkg-arch"
+            echo ""
+            echo "  # Option 2: Build manually"
+            echo "  cd packaging/arch"
+            echo "  makepkg -si"
+            echo ""
+            echo "This will create and install a proper Arch package."
+            echo ""
+            echo "Dependencies: bash, btrfs-progs, snapper"
+            echo "Optional: pandoc (for man page generation)"
+            ;;
+        debian)
+            echo "For Debian-based distributions, you can build a .deb package:"
+            echo ""
+            echo "  # Option 1: Use the Makefile target (recommended)"
+            echo "  make pkg-deb"
+            echo ""
+            echo "  # Option 2: Build manually"
+            echo "  cd packaging/debian"
+            echo "  dpkg-buildpackage -us -uc -b"
+            echo "  sudo dpkg -i ../btrfs-subvolume-tools_*.deb"
+            echo ""
+            echo "This will create and install a proper Debian package."
+            echo ""
+            echo "Dependencies: bash, btrfs-progs, snapper"
+            echo "Build-Dependencies: debhelper (>= 10), pandoc"
+            ;;
+        *)
+            echo "Your distribution ($DISTRO_NAME) doesn't have specific"
+            echo "packaging instructions. Using the generic installer."
+            ;;
+    esac
+    
+    echo ""
+    echo "To continue with the generic installation, press Enter."
+    echo "To exit and use the distribution-specific method, press Ctrl+C."
+    echo ""
+    read -p "Press Enter to continue..."
+}
+
+# Create packaging files for the detected distribution
+create_packaging_files() {
+    detect_distribution
+    
+    log_info "Creating packaging files for $DISTRO_NAME (base: $DISTRO_BASE)"
+    
+    # Create packaging directory structure
+    mkdir -p packaging/arch
+    mkdir -p packaging/debian
+    
+    # Get version from Makefile if possible
+    VERSION="1.0.0"
+    if grep -q "^VERSION" Makefile; then
+        VERSION=$(grep "^VERSION" Makefile | cut -d'=' -f2 | tr -d ' ')
+    fi
+    
+    # Create Arch Linux PKGBUILD
+    cat > packaging/arch/PKGBUILD << EOF
+# Maintainer: Your Name <your.email@example.com>
+pkgname=btrfs-subvolume-tools
+pkgver=$VERSION
+pkgrel=1
+pkgdesc="Tools for managing BTRFS subvolumes and snapshots"
+arch=('any')
+url="https://github.com/yourusername/btrfs-subvolume-tools"
+license=('MIT')
+depends=('bash' 'btrfs-progs' 'snapper')
+makedepends=('pandoc')
+backup=('etc/btrfs-subvolume-tools/config')
+source=("\$pkgname-\$pkgver.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+  cd "\$srcdir/\$pkgname-\$pkgver"
+  
+  # Install binaries
+  install -Dm755 bin/create-subvolume.sh "\$pkgdir/usr/bin/create-subvolume"
+  install -Dm755 bin/configure-snapshots.sh "\$pkgdir/usr/bin/configure-snapshots"
+  
+  # Install man pages
+  install -Dm644 doc/create-subvolume.8.gz "\$pkgdir/usr/share/man/man8/create-subvolume.8.gz"
+  install -Dm644 doc/configure-snapshots.8.gz "\$pkgdir/usr/share/man/man8/configure-snapshots.8.gz"
+  
+  # Install documentation
+  install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
+  install -Dm644 CHANGELOG.md "\$pkgdir/usr/share/doc/\$pkgname/CHANGELOG.md"
+  install -Dm644 LICENSE "\$pkgdir/usr/share/licenses/\$pkgname/LICENSE"
+  
+  # Create default config directory
+  install -dm755 "\$pkgdir/etc/\$pkgname"
+}
+EOF
+    
+    # Create Debian control file
+    cat > packaging/debian/control << EOF
+Source: btrfs-subvolume-tools
+Section: admin
+Priority: optional
+Maintainer: Your Name <your.email@example.com>
+Build-Depends: debhelper (>= 10), pandoc
+Standards-Version: 4.5.0
+Homepage: https://github.com/yourusername/btrfs-subvolume-tools
+Vcs-Browser: https://github.com/yourusername/btrfs-subvolume-tools
+Vcs-Git: https://github.com/yourusername/btrfs-subvolume-tools.git
+
+Package: btrfs-subvolume-tools
+Architecture: all
+Depends: ${misc:Depends}, bash, btrfs-progs, snapper
+Description: Tools for managing BTRFS subvolumes and snapshots
+ A collection of scripts to create and manage BTRFS subvolumes
+ and configure automated snapshots using snapper.
+ .
+ This package provides utilities to:
+  * Create and configure BTRFS subvolumes
+  * Set up snapper for automated snapshots
+EOF
+    
+    # Create Debian rules file
+    cat > packaging/debian/rules << EOF
+#!/usr/bin/make -f
+%:
+	dh \$@
+
+override_dh_auto_install:
+	install -Dm755 bin/create-subvolume.sh \$(CURDIR)/debian/btrfs-subvolume-tools/usr/bin/create-subvolume
+	install -Dm755 bin/configure-snapshots.sh \$(CURDIR)/debian/btrfs-subvolume-tools/usr/bin/configure-snapshots
+	install -Dm644 doc/create-subvolume.8.gz \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/man/man8/create-subvolume.8.gz
+	install -Dm644 doc/configure-snapshots.8.gz \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/man/man8/configure-snapshots.8.gz
+	install -Dm644 README.md \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/doc/btrfs-subvolume-tools/README.md
+	install -Dm644 CHANGELOG.md \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/doc/btrfs-subvolume-tools/CHANGELOG.md
+	install -Dm644 LICENSE \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/doc/btrfs-subvolume-tools/copyright
+	install -dm755 \$(CURDIR)/debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
+EOF
+    
+    # Create Debian changelog
+    cat > packaging/debian/changelog << EOF
+btrfs-subvolume-tools ($VERSION-1) unstable; urgency=medium
+
+  * Initial release.
+
+ -- Your Name <your.email@example.com>  Sun, 30 Mar 2025 08:00:00 +0530
+EOF
+    
+    # Create Debian compat file
+    echo "10" > packaging/debian/compat
+    
+    # Make rules file executable
+    chmod +x packaging/debian/rules
+    
+    log_info "Packaging files created successfully in packaging/ directory"
+    log_info "You may need to customize these files for your specific needs"
+    
+    echo ""
+    echo "==============================================================="
+    echo "  Packaging files created for $DISTRO_NAME (base: $DISTRO_BASE)"
+    echo "==============================================================="
+    echo ""
+    echo "Files created:"
+    echo "  - packaging/arch/PKGBUILD"
+    echo "  - packaging/debian/control"
+    echo "  - packaging/debian/rules"
+    echo "  - packaging/debian/changelog"
+    echo "  - packaging/debian/compat"
+    echo ""
+    echo "You may need to customize these files before building packages."
+    echo "Remember to update your email and GitHub repository information."
+    echo ""
+}
+
 # Install the software
 do_install() {
     local prefix="$1"
+    local destdir="${DESTDIR:-}"
+    local install_root="${destdir}${prefix}"
     
-    log_info "Installing btrfs-subvolume-tools to $prefix"
+    log_info "Installing btrfs-subvolume-tools to ${install_root}"
 
     # Create directories if they don't exist
-    mkdir -p "$prefix/bin"
-    mkdir -p "$prefix/share/man/man8"
-    mkdir -p "$prefix/share/doc/btrfs-subvolume-tools"
+    mkdir -p "${install_root}/bin"
+    mkdir -p "${install_root}/share/man/man8"
+    mkdir -p "${install_root}/share/doc/btrfs-subvolume-tools"
+    mkdir -p "${install_root}/etc/btrfs-subvolume-tools"
 
     # Generate man pages
     if command -v pandoc >/dev/null 2>&1; then
@@ -142,7 +391,7 @@ do_install() {
             log_debug "Processing create-subvolume.md"
             pandoc -s -t man doc/create-subvolume.md -o /tmp/create-subvolume.8
             gzip -f /tmp/create-subvolume.8
-            cp /tmp/create-subvolume.8.gz "$prefix/share/man/man8/"
+            install -m 644 /tmp/create-subvolume.8.gz "${install_root}/share/man/man8/"
             rm /tmp/create-subvolume.8.gz
         else
             log_warning "doc/create-subvolume.md not found, skipping man page"
@@ -153,7 +402,7 @@ do_install() {
             log_debug "Processing configure-snapshots.md"
             pandoc -s -t man doc/configure-snapshots.md -o /tmp/configure-snapshots.8
             gzip -f /tmp/configure-snapshots.8
-            cp /tmp/configure-snapshots.8.gz "$prefix/share/man/man8/"
+            install -m 644 /tmp/configure-snapshots.8.gz "${install_root}/share/man/man8/"
             rm /tmp/configure-snapshots.8.gz
         else
             log_warning "doc/configure-snapshots.md not found, skipping man page"
@@ -165,8 +414,7 @@ do_install() {
     # Install scripts
     if [ -f "bin/create-subvolume.sh" ]; then
         log_info "Installing create-subvolume script..."
-        cp bin/create-subvolume.sh "$prefix/bin/create-subvolume"
-        chmod 755 "$prefix/bin/create-subvolume"
+        install -m 755 bin/create-subvolume.sh "${install_root}/bin/create-subvolume"
     else
         log_error "bin/create-subvolume.sh not found"
         return 1
@@ -174,8 +422,7 @@ do_install() {
 
     if [ -f "bin/configure-snapshots.sh" ]; then
         log_info "Installing configure-snapshots script..."
-        cp bin/configure-snapshots.sh "$prefix/bin/configure-snapshots"
-        chmod 755 "$prefix/bin/configure-snapshots"
+        install -m 755 bin/configure-snapshots.sh "${install_root}/bin/configure-snapshots"
     else
         log_error "bin/configure-snapshots.sh not found"
         return 1
@@ -185,25 +432,44 @@ do_install() {
     log_info "Installing documentation..."
     for doc in README.md CHANGELOG.md LICENSE; do
         if [ -f "$doc" ]; then
-            cp "$doc" "$prefix/share/doc/btrfs-subvolume-tools/"
+            install -m 644 "$doc" "${install_root}/share/doc/btrfs-subvolume-tools/"
         else
             log_warning "$doc not found, skipping"
         fi
     done
 
-    # Update man database if mandb is available
-    if command -v mandb >/dev/null 2>&1; then
+    # Update man database if mandb is available and not in DESTDIR mode
+    if [ -z "$destdir" ] && command -v mandb >/dev/null 2>&1; then
         log_info "Updating man database..."
         mandb >/dev/null 2>&1 || true
     fi
 
-    log_info "Installation completed successfully to $prefix"
-    log_info "You can now use:"
-    log_info "  create-subvolume    - To create and configure btrfs subvolumes"
-    log_info "  configure-snapshots - To set up snapper for automated snapshots"
-    log_info "See the man pages for more information:"
-    log_info "  man create-subvolume"
-    log_info "  man configure-snapshots"
+    # Check for dependencies if not in DESTDIR mode (package building)
+    if [ -z "$destdir" ]; then
+        log_info "Checking for dependencies..."
+        
+        # Check for btrfs-progs
+        if ! command -v btrfs >/dev/null 2>&1; then
+            log_warning "btrfs-progs not found. This is required for BTRFS operations."
+        fi
+        
+        # Check for snapper
+        if ! command -v snapper >/dev/null 2>&1; then
+            log_warning "snapper not found. This is required for snapshot management."
+        fi
+    fi
+
+    log_info "Installation completed successfully to ${install_root}"
+    
+    # Only show usage information if not in DESTDIR mode (package building)
+    if [ -z "$destdir" ]; then
+        log_info "You can now use:"
+        log_info "  create-subvolume    - To create and configure btrfs subvolumes"
+        log_info "  configure-snapshots - To set up snapper for automated snapshots"
+        log_info "See the man pages for more information:"
+        log_info "  man create-subvolume"
+        log_info "  man configure-snapshots"
+    fi
     
     return 0
 }
@@ -212,6 +478,10 @@ do_install() {
 main() {
     # Log start of installation
     log_journal "info" "Starting BTRFS Subvolume Tools installation"
+    
+    # Default settings
+    PACKAGE_MODE=false
+    CREATE_PKGFILES=false
     
     # Parse command line arguments
     parse_args() {
@@ -231,6 +501,16 @@ main() {
                     log_journal "info" "Installation prefix set to: $PREFIX"
                     shift
                     ;;
+                --package)
+                    PACKAGE_MODE=true
+                    log_journal "info" "Package creation mode enabled"
+                    shift
+                    ;;
+                --create-pkgfiles)
+                    CREATE_PKGFILES=true
+                    log_journal "info" "Package file generation mode enabled"
+                    shift
+                    ;;
                 *)
                     # Skip unknown arguments
                     log_journal "warning" "Unknown argument: $1"
@@ -241,6 +521,21 @@ main() {
     }
     
     parse_args "$@"
+    
+    # If in package file generation mode, create packaging files
+    if [ "$CREATE_PKGFILES" = true ]; then
+        create_packaging_files
+        exit 0
+    fi
+    
+    # If in package mode, suggest native packaging
+    if [ "$PACKAGE_MODE" = true ]; then
+        suggest_native_packaging
+        exit 0
+    else
+        # For regular installation, suggest native packaging but continue
+        suggest_native_packaging
+    fi
     
     # Run installation
     if ! do_install "$PREFIX"; then
