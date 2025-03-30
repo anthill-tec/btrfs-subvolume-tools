@@ -166,7 +166,36 @@ pkg-deb: man pkg-files dist
 		echo "Packaging files not found. Run 'make pkg-files' first."; \
 		exit 1; \
 	fi
-	@cd $(PKGDIR) && dpkg-buildpackage -us -uc -b
+	@if command -v dpkg-buildpackage >/dev/null 2>&1; then \
+		if dpkg-checkbuilddeps 2>/dev/null; then \
+			cd $(PKGDIR) && dpkg-buildpackage -us -uc -b; \
+		else \
+			echo "WARNING: Build dependencies not satisfied."; \
+			echo "Creating simplified Debian package structure instead..."; \
+			mkdir -p $(PKGDIR)/deb/DEBIAN $(PKGDIR)/deb/usr/bin $(PKGDIR)/deb/usr/share/man/man8 $(PKGDIR)/deb/usr/share/doc/btrfs-subvolume-tools; \
+			cp bin/create-subvolume.sh $(PKGDIR)/deb/usr/bin/create-subvolume; \
+			cp bin/configure-snapshots.sh $(PKGDIR)/deb/usr/bin/configure-snapshots; \
+			chmod 755 $(PKGDIR)/deb/usr/bin/create-subvolume $(PKGDIR)/deb/usr/bin/configure-snapshots; \
+			cp docs/create-subvolume.8.gz $(PKGDIR)/deb/usr/share/man/man8/; \
+			cp docs/configure-snapshots.8.gz $(PKGDIR)/deb/usr/share/man/man8/; \
+			cp README.md CHANGELOG.md LICENSE $(PKGDIR)/deb/usr/share/doc/btrfs-subvolume-tools/; \
+			echo "Package: btrfs-subvolume-tools" > $(PKGDIR)/deb/DEBIAN/control; \
+			echo "Version: $(VERSION)" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo "Section: admin" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo "Priority: optional" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo "Architecture: all" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo "Depends: bash, btrfs-progs, snapper" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo "Maintainer: Your Name <your.email@example.com>" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo "Description: Tools for managing BTRFS subvolumes and snapshots" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo " This package provides tools for creating and managing BTRFS subvolumes" >> $(PKGDIR)/deb/DEBIAN/control; \
+			echo " and snapshots, including automated snapshot configuration." >> $(PKGDIR)/deb/DEBIAN/control; \
+			dpkg-deb --build $(PKGDIR)/deb $(PKGDIR)/btrfs-subvolume-tools_$(VERSION)_all.deb; \
+			echo "Debian package created at $(PKGDIR)/btrfs-subvolume-tools_$(VERSION)_all.deb"; \
+		fi; \
+	else \
+		echo "ERROR: dpkg-buildpackage not found. Please install the dpkg package."; \
+		exit 1; \
+	fi
 
 # Detect system and build appropriate package
 pkg:
