@@ -5,7 +5,7 @@ BINDIR = $(PREFIX)/bin
 MANDIR = $(PREFIX)/share/man
 DOCDIR = $(PREFIX)/share/doc/btrfs-subvolume-tools
 CONFDIR = $(PREFIX)/etc/btrfs-subvolume-tools
-PROJECT_NAME = "BTRFS Subvolume Tools"
+PROJECT_NAME = btrfs-subvolume-tools
 VERSION = 1.0.0
 
 # Directory structure for package building
@@ -14,7 +14,7 @@ ARCHPKGDIR = $(PKGDIR)/arch
 DEBPKGDIR = $(PKGDIR)/debian
 TESTDIR = tests
 TESTLOGDIR = $(TESTDIR)/logs
-TARBALL_NAME = btrfs-subvolume-tools-$(VERSION)
+TARBALL_NAME = $(PROJECT_NAME)-$(VERSION)
 
 .PHONY: all install uninstall man clean check-deps pkg-arch pkg-deb pkg test debug-test test-clean help
 
@@ -103,7 +103,7 @@ test:
 		echo "Please run: sudo make test"; \
 		exit 1; \
 	fi
-	@$(TESTDIR)/test-orchestrator.sh $(if $(debug),--debug,) $(if $(test-suite),--test-suite=$(test-suite),) $(if $(test-case),--test-case=$(test-case),) --project-name=$(PROJECT_NAME)
+	@$(TESTDIR)/test-orchestrator.sh $(if $(debug),--debug,) $(if $(test-suite),--test-suite=$(test-suite),) $(if $(test-case),--test-case=$(test-case),) --project-name="$(PROJECT_NAME)"
 
 # Run tests in debug mode
 debug-test:
@@ -112,7 +112,7 @@ debug-test:
 		echo "Please run: sudo make debug-test"; \
 		exit 1; \
 	fi
-	@DEBUG=true $(TESTDIR)/test-orchestrator.sh --debug --project-name=$(PROJECT_NAME)
+	@DEBUG=true $(TESTDIR)/test-orchestrator.sh --debug --project-name="$(PROJECT_NAME)"
 
 # Clean up test environment
 test-clean:
@@ -172,14 +172,14 @@ pkg-deb: man pkg-files dist
 		else \
 			echo "WARNING: Build dependencies not satisfied."; \
 			echo "Creating simplified Debian package structure instead..."; \
-			mkdir -p $(PKGDIR)/deb/DEBIAN $(PKGDIR)/deb/usr/bin $(PKGDIR)/deb/usr/share/man/man8 $(PKGDIR)/deb/usr/share/doc/btrfs-subvolume-tools; \
+			mkdir -p $(PKGDIR)/deb/DEBIAN $(PKGDIR)/deb/usr/bin $(PKGDIR)/deb/usr/share/man/man8 $(PKGDIR)/deb/usr/share/doc/$(PROJECT_NAME); \
 			cp bin/create-subvolume.sh $(PKGDIR)/deb/usr/bin/create-subvolume; \
 			cp bin/configure-snapshots.sh $(PKGDIR)/deb/usr/bin/configure-snapshots; \
 			chmod 755 $(PKGDIR)/deb/usr/bin/create-subvolume $(PKGDIR)/deb/usr/bin/configure-snapshots; \
 			cp docs/create-subvolume.8.gz $(PKGDIR)/deb/usr/share/man/man8/; \
 			cp docs/configure-snapshots.8.gz $(PKGDIR)/deb/usr/share/man/man8/; \
-			cp README.md CHANGELOG.md LICENSE $(PKGDIR)/deb/usr/share/doc/btrfs-subvolume-tools/; \
-			echo "Package: btrfs-subvolume-tools" > $(PKGDIR)/deb/DEBIAN/control; \
+			cp README.md CHANGELOG.md LICENSE $(PKGDIR)/deb/usr/share/doc/$(PROJECT_NAME)/; \
+			echo "Package: $(PROJECT_NAME)" > $(PKGDIR)/deb/DEBIAN/control; \
 			echo "Version: $(VERSION)" >> $(PKGDIR)/deb/DEBIAN/control; \
 			echo "Section: admin" >> $(PKGDIR)/deb/DEBIAN/control; \
 			echo "Priority: optional" >> $(PKGDIR)/deb/DEBIAN/control; \
@@ -189,8 +189,8 @@ pkg-deb: man pkg-files dist
 			echo "Description: Tools for managing BTRFS subvolumes and snapshots" >> $(PKGDIR)/deb/DEBIAN/control; \
 			echo " This package provides tools for creating and managing BTRFS subvolumes" >> $(PKGDIR)/deb/DEBIAN/control; \
 			echo " and snapshots, including automated snapshot configuration." >> $(PKGDIR)/deb/DEBIAN/control; \
-			dpkg-deb --build $(PKGDIR)/deb $(PKGDIR)/btrfs-subvolume-tools_$(VERSION)_all.deb; \
-			echo "Debian package created at $(PKGDIR)/btrfs-subvolume-tools_$(VERSION)_all.deb"; \
+			dpkg-deb --build $(PKGDIR)/deb $(PKGDIR)/$(PROJECT_NAME)_$(VERSION)_all.deb; \
+			echo "Debian package created at $(PKGDIR)/$(PROJECT_NAME)_$(VERSION)_all.deb"; \
 		fi; \
 	else \
 		echo "ERROR: dpkg-buildpackage not found. Please install the dpkg package."; \

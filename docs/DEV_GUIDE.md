@@ -43,9 +43,10 @@ project-root/
 ├── docs/                 # Documentation
 │   ├── DEV_GUIDE.md      # This developer guide
 │   └── *.md              # Man page sources and other documentation
-├── packaging/            # Package building files
+├── .dist/                # Build and packaging output directory
 │   ├── arch/             # Arch Linux packaging
-│   └── debian/           # Debian packaging
+│   ├── debian/           # Debian packaging
+│   └── *.tar.gz          # Source tarballs for packaging
 ├── tests/                # Test framework and test cases
 │   ├── logs/             # Test logs directory
 │   ├── test-*.sh         # Test suite files
@@ -142,6 +143,9 @@ make pkg
 
 # Generate packaging files only
 make pkg-files
+
+# Create source tarball for packaging
+make dist
 ```
 
 ### Distribution-Specific Packages
@@ -153,7 +157,7 @@ make pkg-files
 make pkg-arch
 
 # Install the built package
-sudo pacman -U packaging/arch/*.pkg.tar.zst
+sudo pacman -U .dist/arch/*.pkg.tar.zst
 ```
 
 #### Debian-based Systems
@@ -163,8 +167,17 @@ sudo pacman -U packaging/arch/*.pkg.tar.zst
 make pkg-deb
 
 # Install the built package
-sudo dpkg -i packaging/*.deb
+sudo dpkg -i .dist/*.deb
 ```
+
+The build system supports cross-distribution package building, allowing you to:
+
+
+- Build Debian packages on Arch-based systems (and vice versa)
+- Create consistent package structures across different distributions
+- Use a fallback mechanism when full build dependencies aren't available
+
+This makes the framework more portable and easier to deploy across different Linux distributions.
 
 ## Testing Framework
 
@@ -342,22 +355,33 @@ The testing framework provides several advanced features:
 
 ## Makefile Reference
 
-| Target | Description |
-|--------|-------------|
-| `help` | Display help information about available targets |
-| `all` | Generate man pages (default target) |
-| `man` | Generate man pages from markdown |
-| `install` | Install directly (development mode) |
-| `uninstall` | Uninstall direct installation |
-| `check-deps` | Check for required dependencies |
-| `test` | Run tests |
-| `debug-test` | Run tests with debug output |
-| `test-clean` | Clean up test environment |
-| `pkg-files` | Generate packaging files |
-| `pkg-arch` | Build Arch Linux package |
-| `pkg-deb` | Build Debian package |
-| `pkg` | Build package for detected system |
-| `clean` | Remove generated files |
+The Makefile provides targets for both development and deployment workflows:
+
+### Development Targets
+
+- `make all` - Generate man pages
+- `make test` - Run tests (requires root)
+- `make debug-test` - Run tests with debug output (requires root)
+- `make test-clean` - Clean up test environment
+
+### Installation Targets
+
+- `make install` - Install directly (development mode)
+- `make uninstall` - Uninstall direct installation
+
+### Packaging Targets
+
+- `make pkg` - Build package for detected system
+- `make pkg-arch` - Build Arch Linux package
+- `make pkg-deb` - Build Debian package
+- `make pkg-files` - Generate packaging files
+- `make dist` - Create source tarball for packaging
+
+### Other Targets
+
+- `make clean` - Remove generated files
+- `make check-deps` - Check for dependencies
+- `make man` - Generate man pages
 
 ## Environment Variables
 

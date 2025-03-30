@@ -29,9 +29,6 @@ TOTAL_SUITES=0
 PASSED_SUITES=0
 FAILED_SUITES=0
 
-# Default project name if not provided
-PROJECT_NAME="${PROJECT_NAME:-BTRFS Subvolume Tools}"
-
 # Helper function to copy a file and all its dependencies
 copy_with_deps() {
     local file="$1"
@@ -452,7 +449,8 @@ main() {
     # Variables for test suite and case
     SPECIFIC_TEST=""
     SPECIFIC_TEST_CASE=""
-    
+    PROJECT_NAME=""
+
     # Parse command line arguments
     while [[ $# -gt 0 ]]; do
         case "$1" in
@@ -466,6 +464,11 @@ main() {
                 ;;
             --test-case=*)
                 SPECIFIC_TEST_CASE="${1#*=}"
+                shift
+                ;;
+            --project-name=*)
+                # Extract the project name, preserving spaces
+                PROJECT_NAME="${1#--project-name=}"
                 shift
                 ;;
             *)
