@@ -2,3 +2,6 @@
 /tests/logs
 /tests/container*
 /.dist
+
+/docs/*.8.gz
+/docs/*.8
