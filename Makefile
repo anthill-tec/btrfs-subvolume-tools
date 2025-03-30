@@ -9,11 +9,12 @@ PROJECT_NAME = "BTRFS Subvolume Tools"
 VERSION = 1.0.0
 
 # Directory structure for package building
-PKGDIR = packaging
+PKGDIR = .dist
 ARCHPKGDIR = $(PKGDIR)/arch
 DEBPKGDIR = $(PKGDIR)/debian
 TESTDIR = tests
 TESTLOGDIR = $(TESTDIR)/logs
+TARBALL_NAME = btrfs-subvolume-tools-$(VERSION)
 
 .PHONY: all install uninstall man clean check-deps pkg-arch pkg-deb pkg test debug-test test-clean help
 
@@ -55,8 +56,8 @@ install: check-deps all
 	install -m 0755 bin/create-subvolume.sh $(DESTDIR)$(BINDIR)/create-subvolume
 	install -m 0755 bin/configure-snapshots.sh $(DESTDIR)$(BINDIR)/configure-snapshots
 	install -d $(DESTDIR)$(MANDIR)/man8
-	install -m 0644 doc/create-subvolume.8.gz $(DESTDIR)$(MANDIR)/man8/
-	install -m 0644 doc/configure-snapshots.8.gz $(DESTDIR)$(MANDIR)/man8/
+	install -m 0644 docs/create-subvolume.8.gz $(DESTDIR)$(MANDIR)/man8/
+	install -m 0644 docs/configure-snapshots.8.gz $(DESTDIR)$(MANDIR)/man8/
 	install -d $(DESTDIR)$(DOCDIR)
 	install -m 0644 README.md $(DESTDIR)$(DOCDIR)/
 	install -m 0644 CHANGELOG.md $(DESTDIR)$(DOCDIR)/
@@ -73,19 +74,19 @@ uninstall:
 	rm -rf $(DESTDIR)$(DOCDIR)
 	rm -rf $(DESTDIR)$(CONFDIR)
 
-man: doc/create-subvolume.8.gz doc/configure-snapshots.8.gz
+man: docs/create-subvolume.8.gz docs/configure-snapshots.8.gz
 
-doc/create-subvolume.8: doc/create-subvolume.md
-	pandoc -s -t man doc/create-subvolume.md -o doc/create-subvolume.8
+docs/create-subvolume.8: docs/create-subvolume.md
+	pandoc -s -t man docs/create-subvolume.md -o docs/create-subvolume.8
 
-doc/create-subvolume.8.gz: doc/create-subvolume.8
-	gzip -f doc/create-subvolume.8
+docs/create-subvolume.8.gz: docs/create-subvolume.8
+	gzip -f docs/create-subvolume.8
 
-doc/configure-snapshots.8: doc/configure-snapshots.md
-	pandoc -s -t man doc/configure-snapshots.md -o doc/configure-snapshots.8
+docs/configure-snapshots.8: docs/configure-snapshots.md
+	pandoc -s -t man docs/configure-snapshots.md -o docs/configure-snapshots.8
 
-doc/configure-snapshots.8.gz: doc/configure-snapshots.8
-	gzip -f doc/configure-snapshots.8
+docs/configure-snapshots.8.gz: docs/configure-snapshots.8
+	gzip -f docs/configure-snapshots.8
 
 # Check for dependencies
 check-deps:
@@ -129,8 +130,28 @@ pkg-files:
 	@./install.sh --create-pkgfiles
 	@echo "Packaging files created in $(PKGDIR) directory"
 
+# Create source tarball for packaging
+dist: man
+	@echo "Creating source tarball..."
+	@mkdir -p $(PKGDIR)
+	@TMP_DIR=$$(mktemp -d); \
+	DEST="$$TMP_DIR/$(TARBALL_NAME)"; \
+	mkdir -p "$$DEST/bin" "$$DEST/docs"; \
+	echo "Copying required files..."; \
+	cp -r bin/* "$$DEST/bin/" || { echo "Error: bin directory content missing"; exit 1; }; \
+	cp docs/*.md "$$DEST/docs/" || { echo "Error: docs/*.md files missing"; exit 1; }; \
+	cp docs/*.8.gz "$$DEST/docs/" || { echo "Error: Man pages missing. Run 'make man' first"; exit 1; }; \
+	cp README.md LICENSE Makefile install.sh logging.sh "$$DEST/" || { echo "Error: Required files missing"; exit 1; }; \
+	[ -f CHANGELOG.md ] && cp CHANGELOG.md "$$DEST/" || echo "Note: CHANGELOG.md not found, creating placeholder"; \
+	[ -f "$$DEST/CHANGELOG.md" ] || echo "# Changelog\n\n## $(VERSION)\n\n- Initial release" > "$$DEST/CHANGELOG.md"; \
+	echo "Creating tarball..."; \
+	tar -czf $(PKGDIR)/$(TARBALL_NAME).tar.gz -C "$$TMP_DIR" .; \
+	rm -rf "$$TMP_DIR"
+	@echo "Source tarball created at $(PKGDIR)/$(TARBALL_NAME).tar.gz"
+	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(ARCHPKGDIR)/
+
 # Build an Arch Linux package
-pkg-arch: man pkg-files
+pkg-arch: man pkg-files dist
 	@echo "Building Arch Linux package..."
 	@if [ ! -d "$(ARCHPKGDIR)" ]; then \
 		echo "Packaging files not found. Run 'make pkg-files' first."; \
@@ -139,7 +160,7 @@ pkg-arch: man pkg-files
 	@cd $(ARCHPKGDIR) && makepkg -f
 
 # Build a Debian package
-pkg-deb: man pkg-files
+pkg-deb: man pkg-files dist
 	@echo "Building Debian package..."
 	@if [ ! -d "$(DEBPKGDIR)" ]; then \
 		echo "Packaging files not found. Run 'make pkg-files' first."; \
@@ -161,11 +182,12 @@ pkg:
 	fi
 
 clean: test-clean
-	rm -f doc/create-subvolume.8*
-	rm -f doc/configure-snapshots.8*
+	rm -f docs/create-subvolume.8*
+	rm -f docs/configure-snapshots.8*
 	rm -rf $(ARCHPKGDIR)/pkg
 	rm -rf $(ARCHPKGDIR)/src
 	rm -rf $(ARCHPKGDIR)/*.tar.gz
-	rm -f $(PKGDIR)/*.deb
-	rm -f $(PKGDIR)/*.changes
-	rm -f $(PKGDIR)/*.buildinfo
+	rm -rf $(PKGDIR)/*.tar.gz
+	rm -rf $(PKGDIR)/*.deb
+	rm -rf $(PKGDIR)/*.changes
+	rm -rf $(PKGDIR)/*.dsc

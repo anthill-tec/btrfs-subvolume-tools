@@ -202,7 +202,7 @@ suggest_native_packaging() {
             echo "  make pkg-arch"
             echo ""
             echo "  # Option 2: Build manually"
-            echo "  cd packaging/arch"
+            echo "  cd .dist/arch"
             echo "  makepkg -si"
             echo ""
             echo "This will create and install a proper Arch package."
@@ -217,7 +217,7 @@ suggest_native_packaging() {
             echo "  make pkg-deb"
             echo ""
             echo "  # Option 2: Build manually"
-            echo "  cd packaging/debian"
+            echo "  cd .dist/debian"
             echo "  dpkg-buildpackage -us -uc -b"
             echo "  sudo dpkg -i ../btrfs-subvolume-tools_*.deb"
             echo ""
@@ -246,8 +246,8 @@ create_packaging_files() {
     log_info "Creating packaging files for $DISTRO_NAME (base: $DISTRO_BASE)"
     
     # Create packaging directory structure
-    mkdir -p packaging/arch
-    mkdir -p packaging/debian
+    mkdir -p .dist/arch
+    mkdir -p .dist/debian
     
     # Get version from Makefile if possible
     VERSION="1.0.0"
@@ -256,7 +256,7 @@ create_packaging_files() {
     fi
     
     # Create Arch Linux PKGBUILD
-    cat > packaging/arch/PKGBUILD << EOF
+    cat > .dist/arch/PKGBUILD << EOF
 # Maintainer: Your Name <your.email@example.com>
 pkgname=btrfs-subvolume-tools
 pkgver=$VERSION
@@ -279,8 +279,8 @@ package() {
   install -Dm755 bin/configure-snapshots.sh "\$pkgdir/usr/bin/configure-snapshots"
   
   # Install man pages
-  install -Dm644 doc/create-subvolume.8.gz "\$pkgdir/usr/share/man/man8/create-subvolume.8.gz"
-  install -Dm644 doc/configure-snapshots.8.gz "\$pkgdir/usr/share/man/man8/configure-snapshots.8.gz"
+  install -Dm644 docs/create-subvolume.8.gz "\$pkgdir/usr/share/man/man8/create-subvolume.8.gz"
+  install -Dm644 docs/configure-snapshots.8.gz "\$pkgdir/usr/share/man/man8/configure-snapshots.8.gz"
   
   # Install documentation
   install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
@@ -293,7 +293,7 @@ package() {
 EOF
     
     # Create Debian control file
-    cat > packaging/debian/control << EOF
+    cat > .dist/debian/control << EOF
 Source: btrfs-subvolume-tools
 Section: admin
 Priority: optional
@@ -317,7 +317,7 @@ Description: Tools for managing BTRFS subvolumes and snapshots
 EOF
     
     # Create Debian rules file
-    cat > packaging/debian/rules << EOF
+    cat > .dist/debian/rules << EOF
 #!/usr/bin/make -f
 %:
 	dh \$@
@@ -334,7 +334,7 @@ override_dh_auto_install:
 EOF
     
     # Create Debian changelog
-    cat > packaging/debian/changelog << EOF
+    cat > .dist/debian/changelog << EOF
 btrfs-subvolume-tools ($VERSION-1) unstable; urgency=medium
 
   * Initial release.
@@ -343,12 +343,12 @@ btrfs-subvolume-tools ($VERSION-1) unstable; urgency=medium
 EOF
     
     # Create Debian compat file
-    echo "10" > packaging/debian/compat
+    echo "10" > .dist/debian/compat
     
     # Make rules file executable
-    chmod +x packaging/debian/rules
+    chmod +x .dist/debian/rules
     
-    log_info "Packaging files created successfully in packaging/ directory"
+    log_info "Packaging files created successfully in .dist/ directory"
     log_info "You may need to customize these files for your specific needs"
     
     echo ""
@@ -357,11 +357,11 @@ EOF
     echo "==============================================================="
     echo ""
     echo "Files created:"
-    echo "  - packaging/arch/PKGBUILD"
-    echo "  - packaging/debian/control"
-    echo "  - packaging/debian/rules"
-    echo "  - packaging/debian/changelog"
-    echo "  - packaging/debian/compat"
+    echo "  - .dist/arch/PKGBUILD"
+    echo "  - .dist/debian/control"
+    echo "  - .dist/debian/rules"
+    echo "  - .dist/debian/changelog"
+    echo "  - .dist/debian/compat"
     echo ""
     echo "You may need to customize these files before building packages."
     echo "Remember to update your email and GitHub repository information."
