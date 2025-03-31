@@ -191,9 +191,60 @@ pkg-arch: update-checksums
 pkg-deb: pkg-files-deb
 	@echo "Building Debian package..."
 	@if [ -d "$(DEBPKGDIR)" ]; then \
-		cd $(DEBPKGDIR) && dpkg-buildpackage -us -uc -b; \
-		mv ../*.deb $(PKGDIR)/; \
-		echo "Debian package built: $(PKGDIR)/$(PACKAGE_NAME)_$(VERSION)_all.deb"; \
+		if command -v dpkg-buildpackage >/dev/null 2>&1; then \
+			if cd $(DEBPKGDIR) && dpkg-checkbuilddeps 2>/dev/null; then \
+				dpkg-buildpackage -us -uc -b && \
+				mv ../*.deb $(PKGDIR)/ && \
+				echo "Debian package built: $(PKGDIR)/$(PACKAGE_NAME)_$(VERSION)_all.deb"; \
+			else \
+				echo "WARNING: Build dependencies not satisfied. Creating simplified Debian package..."; \
+				ROOT_DIR="$$(cd "$(CURDIR)" && pwd)"; \
+				TARBALL_PATH="$$ROOT_DIR/$(PKGDIR)/$(TARBALL_NAME).tar.gz"; \
+				echo "Using tarball at: $$TARBALL_PATH"; \
+				if [ -f "$$TARBALL_PATH" ]; then \
+					echo "Tarball exists, proceeding with extraction"; \
+					rm -rf "$$ROOT_DIR/$(PKGDIR)/extract" "$$ROOT_DIR/$(PKGDIR)/deb"; \
+					mkdir -p "$$ROOT_DIR/$(PKGDIR)/extract" "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin" "$$ROOT_DIR/$(PKGDIR)/deb/usr/share/man/man8"; \
+					cd "$$ROOT_DIR/$(PKGDIR)/extract" && tar -xzf "$$TARBALL_PATH"; \
+					ls -la "$$ROOT_DIR/$(PKGDIR)/extract"; \
+					EXTRACT_DIR="$$ROOT_DIR/$(PKGDIR)/extract/$(TARBALL_NAME)"; \
+					if [ -d "$$EXTRACT_DIR" ] && [ -f "$$EXTRACT_DIR/bin/create-subvolume.sh" ]; then \
+						echo "Found source files in $$EXTRACT_DIR"; \
+						cp "$$EXTRACT_DIR/bin/create-subvolume.sh" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/create-subvolume"; \
+						cp "$$EXTRACT_DIR/bin/configure-snapshots.sh" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/configure-snapshots"; \
+						chmod 755 "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/create-subvolume" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/configure-snapshots"; \
+						if [ -d "$$EXTRACT_DIR/man" ] && [ -f "$$EXTRACT_DIR/man/create-subvolume.8.gz" ]; then \
+							cp "$$EXTRACT_DIR/man/"*.8.gz "$$ROOT_DIR/$(PKGDIR)/deb/usr/share/man/man8/"; \
+						fi; \
+						echo "Package: $(PACKAGE_NAME)" > "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Version: $(VERSION)" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Section: admin" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Priority: optional" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Architecture: all" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Depends: bash, btrfs-progs, snapper" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Maintainer: Antony J <antojk@pm.me>" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Description: Tools for managing BTRFS subvolumes and snapshots" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo " This package provides tools for creating and managing BTRFS subvolumes" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo " and snapshots, including automated snapshot configuration." >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						cd "$$ROOT_DIR" && dpkg-deb --build --root-owner-group "$(PKGDIR)/deb" "$(PKGDIR)/$(PACKAGE_NAME)_$(VERSION)_all.deb" && \
+						echo "Simplified Debian package built: $(PKGDIR)/$(PACKAGE_NAME)_$(VERSION)_all.deb"; \
+					else \
+						echo "ERROR: Source files not found in tarball"; \
+						echo "Expected files in: $$EXTRACT_DIR"; \
+						find "$$ROOT_DIR/$(PKGDIR)/extract" -type f | sort; \
+						exit 1; \
+					fi; \
+					rm -rf "$$ROOT_DIR/$(PKGDIR)/extract" "$$ROOT_DIR/$(PKGDIR)/deb"; \
+				else \
+					echo "ERROR: Tarball not found at $$TARBALL_PATH"; \
+					find "$$ROOT_DIR/$(PKGDIR)" -name "*.tar.gz" -type f; \
+					exit 1; \
+				fi; \
+			fi; \
+		else \
+			echo "ERROR: dpkg-buildpackage not found. Please install dpkg-dev package."; \
+			exit 1; \
+		fi; \
 	else \
 		echo "Error: Debian packaging files not found"; \
 		exit 1; \

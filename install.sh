@@ -306,7 +306,7 @@ Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
 
 Package: btrfs-subvolume-tools
 Architecture: all
-Depends: ${misc:Depends}, bash, btrfs-progs, snapper
+Depends: bash, btrfs-progs, snapper
 Description: Tools for managing BTRFS subvolumes and snapshots
  A collection of scripts to create and manage BTRFS subvolumes
  and configure automated snapshots using snapper.
@@ -624,7 +624,7 @@ Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
 
 Package: btrfs-subvolume-tools
 Architecture: all
-Depends: ${misc:Depends}, bash, btrfs-progs, snapper
+Depends: bash, btrfs-progs, snapper
 Description: Tools for managing BTRFS subvolumes and snapshots
  This package provides tools for creating and managing BTRFS subvolumes
  and snapshots, including automated snapshot configuration.
