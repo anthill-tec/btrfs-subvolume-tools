@@ -153,6 +153,7 @@ dist: man
 	tar -czf $(PKGDIR)/$(TARBALL_NAME).tar.gz -C "$$TMP_DIR" .; \
 	rm -rf "$$TMP_DIR"
 	@echo "Source tarball created at $(PKGDIR)/$(TARBALL_NAME).tar.gz"
+	@mkdir -p $(ARCHPKGDIR)
 	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(ARCHPKGDIR)
 
 # Arch-specific packaging files
@@ -162,6 +163,10 @@ pkg-files-arch: dist
 	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(ARCHPKGDIR)/src/
 	@PACKAGE_NAME="$(PACKAGE_NAME)" VERSION="$(VERSION)" ./install.sh --create-pkgfiles --arch
 	@echo "Arch packaging files created in $(ARCHPKGDIR)"
+	@echo "Updating checksums..."
+	@cd $(ARCHPKGDIR) && \
+	sed -i "s/sha256sums=.*/sha256sums=('$$(sha256sum src/$(TARBALL_NAME).tar.gz | cut -d' ' -f1)')/" PKGBUILD && \
+	echo "Checksums and metadata updated successfully"
 
 # Debian-specific packaging files
 pkg-files-deb: dist
@@ -267,10 +272,4 @@ clean: test-clean
 	rm -rf man/
 	rm -f docs/create-subvolume.8*
 	rm -f docs/configure-snapshots.8*
-	rm -rf $(ARCHPKGDIR)/pkg
-	rm -rf $(ARCHPKGDIR)/src
-	rm -rf $(ARCHPKGDIR)/*.tar.gz
-	rm -rf $(PKGDIR)/*.tar.gz
-	rm -rf $(PKGDIR)/*.deb
-	rm -rf $(PKGDIR)/*.changes
-	rm -rf $(PKGDIR)/*.dsc
+	rm -rf $(PKGDIR)
