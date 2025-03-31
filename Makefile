@@ -6,9 +6,13 @@ MANDIR = $(PREFIX)/share/man
 PROJECT_NAME = BTRFS Subvolume Tools
 # Automatically derive package name from project name (lowercase, replace spaces with hyphens)
 PACKAGE_NAME = $(shell echo "$(PROJECT_NAME)" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+# Package information
+VERSION = 1.0.0
+MAINTAINER_NAME = Antony John
+MAINTAINER_EMAIL = still.duck5711@fastmail.com
+MAINTAINER = $(MAINTAINER_NAME) <$(MAINTAINER_EMAIL)>
 DOCDIR = $(PREFIX)/share/doc/$(PACKAGE_NAME)
 CONFDIR = $(PREFIX)/etc/$(PACKAGE_NAME)
-VERSION = 1.0.0
 
 # Directory structure for package building
 PKGDIR = .dist
@@ -161,7 +165,7 @@ pkg-files-arch: dist
 	@echo "Creating Arch packaging files..."
 	@mkdir -p $(ARCHPKGDIR)/src
 	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(ARCHPKGDIR)/src/
-	@PACKAGE_NAME="$(PACKAGE_NAME)" VERSION="$(VERSION)" ./install.sh --create-pkgfiles --arch
+	@PACKAGE_NAME="$(PACKAGE_NAME)" VERSION="$(VERSION)" MAINTAINER_NAME="$(MAINTAINER_NAME)" MAINTAINER_EMAIL="$(MAINTAINER_EMAIL)" ./install.sh --create-pkgfiles --arch
 	@echo "Arch packaging files created in $(ARCHPKGDIR)"
 	@echo "Updating checksums..."
 	@cd $(ARCHPKGDIR) && \
@@ -171,9 +175,9 @@ pkg-files-arch: dist
 # Debian-specific packaging files
 pkg-files-deb: dist
 	@echo "Creating Debian packaging files..."
-	@mkdir -p $(DEBPKGDIR)/src
-	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(DEBPKGDIR)/src/
-	@PACKAGE_NAME="$(PACKAGE_NAME)" VERSION="$(VERSION)" ./install.sh --create-pkgfiles --debian
+	@mkdir -p $(DEBPKGDIR)
+	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(DEBPKGDIR)/
+	@PACKAGE_NAME="$(PACKAGE_NAME)" VERSION="$(VERSION)" MAINTAINER_NAME="$(MAINTAINER_NAME)" MAINTAINER_EMAIL="$(MAINTAINER_EMAIL)" ./install.sh --create-pkgfiles --debian
 	@echo "Debian packaging files created in $(DEBPKGDIR)"
 
 # Update checksums (depends on Arch files)
@@ -227,7 +231,7 @@ pkg-deb: pkg-files-deb
 						echo "Priority: optional" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo "Architecture: all" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo "Depends: bash, btrfs-progs, snapper" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
-						echo "Maintainer: Antony J <antojk@pm.me>" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Maintainer: $(MAINTAINER)" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo "Description: Tools for managing BTRFS subvolumes and snapshots" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo " This package provides tools for creating and managing BTRFS subvolumes" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo " and snapshots, including automated snapshot configuration." >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \

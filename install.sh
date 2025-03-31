@@ -243,11 +243,10 @@ suggest_native_packaging() {
 create_packaging_files() {
     detect_distribution
     
-    log_info "Creating packaging files for $DISTRO_NAME (base: $DISTRO_BASE)"
+    log_info "Creating packaging files for $DISTRO_NAME"
     
-    # Create packaging directory structure
-    mkdir -p .dist/arch
-    mkdir -p .dist/debian
+    # Create dist directory if it doesn't exist
+    mkdir -p .dist
     
     # Get version from Makefile if possible
     VERSION="1.0.0"
@@ -255,9 +254,14 @@ create_packaging_files() {
         VERSION=$(grep "^VERSION" Makefile | cut -d'=' -f2 | tr -d ' ')
     fi
     
+    # Set maintainer info from environment variables or use defaults
+    MAINTAINER_NAME="${MAINTAINER_NAME:-Your Name Here}"
+    MAINTAINER_EMAIL="${MAINTAINER_EMAIL:-your.email@example.com}"
+    MAINTAINER="${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>"
+    
     # Create Arch Linux PKGBUILD
     cat > .dist/arch/PKGBUILD << EOF
-# Maintainer: Antony J <antojk@pm.me>
+# Maintainer: ${MAINTAINER}
 pkgname=${PACKAGE_NAME}
 pkgver=${VERSION}
 pkgrel=1
@@ -279,16 +283,15 @@ package() {
   install -Dm755 bin/configure-snapshots.sh "\$pkgdir/usr/bin/configure-snapshots"
   
   # Install man pages
-  install -Dm644 docs/create-subvolume.8.gz "\$pkgdir/usr/share/man/man8/create-subvolume.8.gz"
-  install -Dm644 docs/configure-snapshots.8.gz "\$pkgdir/usr/share/man/man8/configure-snapshots.8.gz"
+  install -Dm644 man/*.8.gz "\$pkgdir/usr/share/man/man8/"
   
-  # Install documentation
-  install -Dm644 README.md "\$pkgdir/usr/share/doc/\$pkgname/README.md"
-  install -Dm644 CHANGELOG.md "\$pkgdir/usr/share/doc/\$pkgname/CHANGELOG.md"
-  install -Dm644 LICENSE "\$pkgdir/usr/share/licenses/\$pkgname/LICENSE"
-  
-  # Create default config directory
-  install -dm755 "\$pkgdir/etc/\$pkgname"
+  # Install config file
+  if [ -f "docs/config.example" ]; then
+    install -Dm644 docs/config.example "\$pkgdir/etc/btrfs-subvolume-tools/config"
+  else
+    echo "# BTRFS Subvolume Tools Configuration" > "\$pkgdir/etc/btrfs-subvolume-tools/config"
+    echo "# Created during package installation" >> "\$pkgdir/etc/btrfs-subvolume-tools/config"
+  fi
 }
 EOF
     
@@ -297,7 +300,7 @@ EOF
 Source: btrfs-subvolume-tools
 Section: admin
 Priority: optional
-Maintainer: Antony J <antojk@pm.me>
+Maintainer: ${MAINTAINER}
 Build-Depends: debhelper (>= 10), pandoc
 Standards-Version: 4.5.0
 Homepage: https://github.com/anthill-tec/btrfs-subvolume-tools
@@ -308,8 +311,8 @@ Package: btrfs-subvolume-tools
 Architecture: all
 Depends: bash, btrfs-progs, snapper
 Description: Tools for managing BTRFS subvolumes and snapshots
- A collection of scripts to create and manage BTRFS subvolumes
- and configure automated snapshots using snapper.
+ This package provides tools for creating and managing BTRFS subvolumes
+ and snapshots, including automated snapshot configuration.
  .
  This package provides utilities to:
   * Create and configure BTRFS subvolumes
@@ -323,23 +326,22 @@ EOF
 	dh \$@
 
 override_dh_auto_install:
-	install -Dm755 bin/create-subvolume.sh \$(CURDIR)/debian/btrfs-subvolume-tools/usr/bin/create-subvolume
-	install -Dm755 bin/configure-snapshots.sh \$(CURDIR)/debian/btrfs-subvolume-tools/usr/bin/configure-snapshots
-	install -Dm644 doc/create-subvolume.8.gz \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/man/man8/create-subvolume.8.gz
-	install -Dm644 doc/configure-snapshots.8.gz \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/man/man8/configure-snapshots.8.gz
-	install -Dm644 README.md \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/doc/btrfs-subvolume-tools/README.md
-	install -Dm644 CHANGELOG.md \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/doc/btrfs-subvolume-tools/CHANGELOG.md
-	install -Dm644 LICENSE \$(CURDIR)/debian/btrfs-subvolume-tools/usr/share/doc/btrfs-subvolume-tools/copyright
-	install -dm755 \$(CURDIR)/debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
+	mkdir -p debian/btrfs-subvolume-tools/usr/bin
+	mkdir -p debian/btrfs-subvolume-tools/usr/share/man/man8
+	mkdir -p debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
+	install -m 755 bin/create-subvolume.sh debian/btrfs-subvolume-tools/usr/bin/create-subvolume
+	install -m 755 bin/configure-snapshots.sh debian/btrfs-subvolume-tools/usr/bin/configure-snapshots
+	install -m 644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
+	install -m 644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
 EOF
     
     # Create Debian changelog
     cat > .dist/debian/changelog << EOF
-btrfs-subvolume-tools ($VERSION-1) unstable; urgency=medium
+btrfs-subvolume-tools (${VERSION}) unstable; urgency=medium
 
   * Initial release.
 
- -- Antony J <antojk@pm.me>  Sun, 30 Mar 2025 08:00:00 +0530
+ -- ${MAINTAINER}  Sun, 30 Mar 2025 08:00:00 +0530
 EOF
     
     # Create Debian compat file
@@ -353,7 +355,7 @@ EOF
     
     echo ""
     echo "==============================================================="
-    echo "  Packaging files created for $DISTRO_NAME (base: $DISTRO_BASE)"
+    echo "  Packaging files created for $DISTRO_NAME"
     echo "==============================================================="
     echo ""
     echo "Files created:"
@@ -564,7 +566,7 @@ create_arch_package_files() {
     
     # Create PKGBUILD with properly expanded variables
     cat > .dist/arch/PKGBUILD << EOF
-# Maintainer: Antony J <antojk@pm.me>
+# Maintainer: ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>
 pkgname=${PACKAGE_NAME}
 pkgver=${VERSION}
 pkgrel=1
@@ -615,7 +617,7 @@ create_debian_package_files() {
 Source: btrfs-subvolume-tools
 Section: admin
 Priority: optional
-Maintainer: Antony J <antojk@pm.me>
+Maintainer: ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>
 Build-Depends: debhelper (>= 10), pandoc
 Standards-Version: 4.5.0
 Homepage: https://github.com/anthill-tec/btrfs-subvolume-tools
@@ -656,7 +658,7 @@ btrfs-subvolume-tools (${VERSION}) unstable; urgency=medium
 
   * Initial release.
 
- -- Antony J <antojk@pm.me>  Sun, 30 Mar 2025 08:00:00 +0530
+ -- ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>  Sun, 30 Mar 2025 08:00:00 +0530
 EOF
     
     # Create Debian compat file
