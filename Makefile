@@ -65,8 +65,8 @@ install: check-deps all
 	install -m 0755 bin/create-subvolume.sh $(DESTDIR)$(BINDIR)/create-subvolume
 	install -m 0755 bin/configure-snapshots.sh $(DESTDIR)$(BINDIR)/configure-snapshots
 	install -d $(DESTDIR)$(MANDIR)/man8
-	install -m 0644 docs/create-subvolume.8.gz $(DESTDIR)$(MANDIR)/man8/
-	install -m 0644 docs/configure-snapshots.8.gz $(DESTDIR)$(MANDIR)/man8/
+	install -m 0644 man/create-subvolume.8.gz $(DESTDIR)$(MANDIR)/man8/
+	install -m 0644 man/configure-snapshots.8.gz $(DESTDIR)$(MANDIR)/man8/
 	install -d $(DESTDIR)$(DOCDIR)
 	install -m 0644 README.md $(DESTDIR)$(DOCDIR)/
 	install -m 0644 CHANGELOG.md $(DESTDIR)$(DOCDIR)/
@@ -83,7 +83,12 @@ uninstall:
 	rm -rf $(DESTDIR)$(DOCDIR)
 	rm -rf $(DESTDIR)$(CONFDIR)
 
-man: docs/create-subvolume.8.gz docs/configure-snapshots.8.gz
+man:
+	@mkdir -p man
+	@pandoc -s -t man docs/create-subvolume.md -o man/create-subvolume.8
+	@gzip -f man/create-subvolume.8
+	@pandoc -s -t man docs/configure-snapshots.md -o man/configure-snapshots.8
+	@gzip -f man/configure-snapshots.8
 
 docs/create-subvolume.8: docs/create-subvolume.md
 	pandoc -s -t man docs/create-subvolume.md -o docs/create-subvolume.8
@@ -129,27 +134,18 @@ test-clean:
 	@rm -rf $(TESTDIR)/container
 	@rm -rf $(TESTLOGDIR)
 
-# Package building targets
-# Create packaging files
-pkg-files:
-	@echo "Creating packaging files..."
-	@mkdir -p $(PKGDIR)
-	@mkdir -p $(ARCHPKGDIR)
-	@mkdir -p $(DEBPKGDIR)
-	@./install.sh --create-pkgfiles
-	@echo "Packaging files created in $(PKGDIR) directory"
-
 # Create source tarball for packaging
 dist: man
 	@echo "Creating source tarball..."
 	@mkdir -p $(PKGDIR)
 	@TMP_DIR=$$(mktemp -d); \
 	DEST="$$TMP_DIR/$(TARBALL_NAME)"; \
+	mkdir -p "$$DEST/man"; \
 	mkdir -p "$$DEST/bin" "$$DEST/docs"; \
 	echo "Copying required files..."; \
 	cp -r bin/* "$$DEST/bin/" || { echo "Error: bin directory content missing"; exit 1; }; \
 	cp docs/*.md "$$DEST/docs/" || { echo "Error: docs/*.md files missing"; exit 1; }; \
-	cp docs/*.8.gz "$$DEST/docs/" || { echo "Error: Man pages missing. Run 'make man' first"; exit 1; }; \
+	cp man/*.8.gz "$$DEST/man/" || { echo "Error: Man pages missing. Run 'make man' first"; exit 1; }; \
 	cp README.md LICENSE Makefile install.sh logging.sh "$$DEST/" || { echo "Error: Required files missing"; exit 1; }; \
 	[ -f CHANGELOG.md ] && cp CHANGELOG.md "$$DEST/" || echo "Note: CHANGELOG.md not found, creating placeholder"; \
 	[ -f "$$DEST/CHANGELOG.md" ] || echo "# Changelog\n\n## $(VERSION)\n\n- Initial release" > "$$DEST/CHANGELOG.md"; \
@@ -157,52 +153,49 @@ dist: man
 	tar -czf $(PKGDIR)/$(TARBALL_NAME).tar.gz -C "$$TMP_DIR" .; \
 	rm -rf "$$TMP_DIR"
 	@echo "Source tarball created at $(PKGDIR)/$(TARBALL_NAME).tar.gz"
-	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(ARCHPKGDIR)/
+	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(ARCHPKGDIR)
 
-# Build an Arch Linux package
-pkg-arch: man pkg-files dist
-	@echo "Building Arch Linux package..."
-	@if [ ! -d "$(ARCHPKGDIR)" ]; then \
-		echo "Packaging files not found. Run 'make pkg-files' first."; \
-		exit 1; \
-	fi
-	@cd $(ARCHPKGDIR) && makepkg -f
+# Arch-specific packaging files
+pkg-files-arch: dist
+	@echo "Creating Arch packaging files..."
+	@mkdir -p $(ARCHPKGDIR)/src
+	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(ARCHPKGDIR)/src/
+	@PACKAGE_NAME="$(PACKAGE_NAME)" VERSION="$(VERSION)" ./install.sh --create-pkgfiles --arch
+	@echo "Arch packaging files created in $(ARCHPKGDIR)"
 
-# Build a Debian package
-pkg-deb: man pkg-files dist
+# Debian-specific packaging files
+pkg-files-deb: dist
+	@echo "Creating Debian packaging files..."
+	@mkdir -p $(DEBPKGDIR)/src
+	@cp $(PKGDIR)/$(TARBALL_NAME).tar.gz $(DEBPKGDIR)/src/
+	@PACKAGE_NAME="$(PACKAGE_NAME)" VERSION="$(VERSION)" ./install.sh --create-pkgfiles --debian
+	@echo "Debian packaging files created in $(DEBPKGDIR)"
+
+# Update checksums (depends on Arch files)
+update-checksums: pkg-files-arch
+	@echo "Updating checksums..."
+	@cd $(ARCHPKGDIR) && \
+	sed -i "s|source=.*|source=(\"$(TARBALL_NAME).tar.gz\")|" PKGBUILD && \
+	makepkg -g >> PKGBUILD && \
+	makepkg --printsrcinfo > .SRCINFO
+	@echo "Checksums and metadata updated successfully"
+
+# Build Arch package
+pkg-arch: update-checksums
+	@echo "Building Arch package..."
+	@cd $(ARCHPKGDIR) && makepkg -s --clean --force --noconfirm
+	@mv $(ARCHPKGDIR)/*.pkg.tar.zst $(PKGDIR)/
+	@echo "Package built: $(PKGDIR)/$(PACKAGE_NAME)-$(VERSION)-1-any.pkg.tar.zst"
+
+# Build Debian package
+pkg-deb: pkg-files-deb
 	@echo "Building Debian package..."
-	@if [ ! -d "$(DEBPKGDIR)" ]; then \
-		echo "Packaging files not found. Run 'make pkg-files' first."; \
-		exit 1; \
-	fi
-	@if command -v dpkg-buildpackage >/dev/null 2>&1; then \
-		if dpkg-checkbuilddeps 2>/dev/null; then \
-			cd $(PKGDIR) && dpkg-buildpackage -us -uc -b; \
-		else \
-			echo "WARNING: Build dependencies not satisfied."; \
-			echo "Creating simplified Debian package structure instead..."; \
-			mkdir -p $(PKGDIR)/deb/DEBIAN $(PKGDIR)/deb/usr/bin $(PKGDIR)/deb/usr/share/man/man8 $(PKGDIR)/deb/usr/share/doc/$(PACKAGE_NAME); \
-			cp bin/create-subvolume.sh $(PKGDIR)/deb/usr/bin/create-subvolume; \
-			cp bin/configure-snapshots.sh $(PKGDIR)/deb/usr/bin/configure-snapshots; \
-			chmod 755 $(PKGDIR)/deb/usr/bin/create-subvolume $(PKGDIR)/deb/usr/bin/configure-snapshots; \
-			cp docs/create-subvolume.8.gz $(PKGDIR)/deb/usr/share/man/man8/; \
-			cp docs/configure-snapshots.8.gz $(PKGDIR)/deb/usr/share/man/man8/; \
-			cp README.md CHANGELOG.md LICENSE $(PKGDIR)/deb/usr/share/doc/$(PACKAGE_NAME)/; \
-			echo "Package: $(PACKAGE_NAME)" > $(PKGDIR)/deb/DEBIAN/control; \
-			echo "Version: $(VERSION)" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo "Section: admin" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo "Priority: optional" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo "Architecture: all" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo "Depends: bash, btrfs-progs, snapper" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo "Maintainer: Your Name <your.email@example.com>" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo "Description: Tools for managing BTRFS subvolumes and snapshots" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo " This package provides tools for creating and managing BTRFS subvolumes" >> $(PKGDIR)/deb/DEBIAN/control; \
-			echo " and snapshots, including automated snapshot configuration." >> $(PKGDIR)/deb/DEBIAN/control; \
-			dpkg-deb --build $(PKGDIR)/deb $(PKGDIR)/$(PACKAGE_NAME)_$(VERSION)_all.deb; \
-			echo "Debian package created at $(PKGDIR)/$(PACKAGE_NAME)_$(VERSION)_all.deb"; \
-		fi; \
+	@if [ -d "$(DEBPKGDIR)" ]; then \
+		cd $(DEBPKGDIR) && dpkg-buildpackage -us -uc -b; \
+		mv ../*.deb $(PKGDIR)/; \
+		echo "Debian package built: $(PKGDIR)/$(PACKAGE_NAME)_$(VERSION)_all.deb"; \
 	else \
-		echo "ERROR: dpkg-buildpackage not found. Please install the dpkg package."; \
+		echo "Error: Debian packaging files not found"; \
 		exit 1; \
 	fi
 
@@ -220,6 +213,7 @@ pkg:
 	fi
 
 clean: test-clean
+	rm -rf man/
 	rm -f docs/create-subvolume.8*
 	rm -f docs/configure-snapshots.8*
 	rm -rf $(ARCHPKGDIR)/pkg

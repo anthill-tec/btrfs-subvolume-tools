@@ -257,18 +257,18 @@ create_packaging_files() {
     
     # Create Arch Linux PKGBUILD
     cat > .dist/arch/PKGBUILD << EOF
-# Maintainer: Your Name <your.email@example.com>
-pkgname=btrfs-subvolume-tools
-pkgver=$VERSION
+# Maintainer: Antony J <antojk@pm.me>
+pkgname=${PACKAGE_NAME}
+pkgver=${VERSION}
 pkgrel=1
 pkgdesc="Tools for managing BTRFS subvolumes and snapshots"
 arch=('any')
-url="https://github.com/yourusername/btrfs-subvolume-tools"
+url="https://github.com/anthill-tec/btrfs-subvolume-tools"
 license=('MIT')
 depends=('bash' 'btrfs-progs' 'snapper')
 makedepends=('pandoc')
 backup=('etc/btrfs-subvolume-tools/config')
-source=("\$pkgname-\$pkgver.tar.gz")
+source=("$pkgname-$pkgver.tar.gz")
 sha256sums=('SKIP')
 
 package() {
@@ -297,12 +297,12 @@ EOF
 Source: btrfs-subvolume-tools
 Section: admin
 Priority: optional
-Maintainer: Your Name <your.email@example.com>
+Maintainer: Antony J <antojk@pm.me>
 Build-Depends: debhelper (>= 10), pandoc
 Standards-Version: 4.5.0
-Homepage: https://github.com/yourusername/btrfs-subvolume-tools
-Vcs-Browser: https://github.com/yourusername/btrfs-subvolume-tools
-Vcs-Git: https://github.com/yourusername/btrfs-subvolume-tools.git
+Homepage: https://github.com/anthill-tec/btrfs-subvolume-tools
+Vcs-Browser: https://github.com/anthill-tec/btrfs-subvolume-tools
+Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
 
 Package: btrfs-subvolume-tools
 Architecture: all
@@ -339,7 +339,7 @@ btrfs-subvolume-tools ($VERSION-1) unstable; urgency=medium
 
   * Initial release.
 
- -- Your Name <your.email@example.com>  Sun, 30 Mar 2025 08:00:00 +0530
+ -- Antony J <antojk@pm.me>  Sun, 30 Mar 2025 08:00:00 +0530
 EOF
     
     # Create Debian compat file
@@ -507,9 +507,25 @@ main() {
                     shift
                     ;;
                 --create-pkgfiles)
+                    log_info "Package file generation mode enabled"
                     CREATE_PKGFILES=true
-                    log_journal "info" "Package file generation mode enabled"
-                    shift
+                    
+                    # Check for distribution specification
+                    if [ "$2" == "--arch" ]; then
+                        log_info "Creating packaging files for Arch Linux"
+                        create_arch_package_files
+                        exit 0
+                    elif [ "$2" == "--debian" ]; then
+                        log_info "Creating packaging files for Debian Linux"
+                        create_debian_package_files
+                        exit 0
+                    else
+                        # Default behavior: create all package files
+                        detect_distribution
+                        log_info "Creating packaging files for $DISTRO_NAME (base: $DISTRO_ID)"
+                        create_package_files
+                        exit 0
+                    fi
                     ;;
                 *)
                     # Skip unknown arguments
@@ -521,12 +537,6 @@ main() {
     }
     
     parse_args "$@"
-    
-    # If in package file generation mode, create packaging files
-    if [ "$CREATE_PKGFILES" = true ]; then
-        create_packaging_files
-        exit 0
-    fi
     
     # If in package mode, suggest native packaging
     if [ "$PACKAGE_MODE" = true ]; then
@@ -546,6 +556,122 @@ main() {
     
     log_journal "info" "Installation completed successfully"
     exit 0
+}
+
+# Function to create package files for Arch Linux
+create_arch_package_files() {
+    mkdir -p .dist/arch
+    
+    # Create PKGBUILD with properly expanded variables
+    cat > .dist/arch/PKGBUILD << EOF
+# Maintainer: Antony J <antojk@pm.me>
+pkgname=${PACKAGE_NAME}
+pkgver=${VERSION}
+pkgrel=1
+pkgdesc="Tools for managing BTRFS subvolumes and snapshots"
+arch=('any')
+url="https://github.com/anthill-tec/btrfs-subvolume-tools"
+license=('GPL3')
+depends=('bash' 'btrfs-progs' 'snapper')
+makedepends=('pandoc')
+backup=('etc/btrfs-subvolume-tools/config')
+source=("${PACKAGE_NAME}-${VERSION}.tar.gz")
+sha256sums=('SKIP')
+
+package() {
+    cd "\$srcdir/${PACKAGE_NAME}-${VERSION}"
+    
+    # Create directories
+    mkdir -p "\$pkgdir/usr/bin"
+    mkdir -p "\$pkgdir/usr/share/man/man8"
+    mkdir -p "\$pkgdir/etc/btrfs-subvolume-tools"
+    
+    # Install binaries
+    install -Dm755 bin/create-subvolume.sh "\$pkgdir/usr/bin/create-subvolume"
+    install -Dm755 bin/configure-snapshots.sh "\$pkgdir/usr/bin/configure-snapshots"
+    
+    # Install man pages
+    install -Dm644 man/*.8.gz "\$pkgdir/usr/share/man/man8/"
+    
+    # Install config file
+    if [ -f "docs/config.example" ]; then
+        install -Dm644 docs/config.example "\$pkgdir/etc/btrfs-subvolume-tools/config"
+    else
+        echo "# BTRFS Subvolume Tools Configuration" > "\$pkgdir/etc/btrfs-subvolume-tools/config"
+        echo "# Created during package installation" >> "\$pkgdir/etc/btrfs-subvolume-tools/config"
+    fi
+}
+EOF
+
+    log_info "Arch packaging files created successfully in .dist/arch directory"
+}
+
+# Function to create package files for Debian
+create_debian_package_files() {
+    mkdir -p .dist/debian/debian
+    
+    # Create control file
+    cat > .dist/debian/debian/control << EOF
+Source: btrfs-subvolume-tools
+Section: admin
+Priority: optional
+Maintainer: Antony J <antojk@pm.me>
+Build-Depends: debhelper (>= 10), pandoc
+Standards-Version: 4.5.0
+Homepage: https://github.com/anthill-tec/btrfs-subvolume-tools
+Vcs-Browser: https://github.com/anthill-tec/btrfs-subvolume-tools
+Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
+
+Package: btrfs-subvolume-tools
+Architecture: all
+Depends: ${misc:Depends}, bash, btrfs-progs, snapper
+Description: Tools for managing BTRFS subvolumes and snapshots
+ This package provides tools for creating and managing BTRFS subvolumes
+ and snapshots, including automated snapshot configuration.
+ .
+ This package provides utilities to:
+  * Create and configure BTRFS subvolumes
+  * Set up snapper for automated snapshots
+EOF
+
+    # Create rules file
+    cat > .dist/debian/debian/rules << EOF
+#!/usr/bin/make -f
+%:
+	dh \$@
+
+override_dh_auto_install:
+	mkdir -p debian/btrfs-subvolume-tools/usr/bin
+	mkdir -p debian/btrfs-subvolume-tools/usr/share/man/man8
+	mkdir -p debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
+	install -m 755 bin/create-subvolume.sh debian/btrfs-subvolume-tools/usr/bin/create-subvolume
+	install -m 755 bin/configure-snapshots.sh debian/btrfs-subvolume-tools/usr/bin/configure-snapshots
+	install -m 644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
+	install -m 644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
+EOF
+
+    # Create changelog
+    cat > .dist/debian/debian/changelog << EOF
+btrfs-subvolume-tools (${VERSION}) unstable; urgency=medium
+
+  * Initial release.
+
+ -- Antony J <antojk@pm.me>  Sun, 30 Mar 2025 08:00:00 +0530
+EOF
+    
+    # Create Debian compat file
+    echo "10" > .dist/debian/debian/compat
+    
+    # Make rules file executable
+    chmod +x .dist/debian/debian/rules
+    
+    log_info "Debian packaging files created successfully in .dist/debian directory"
+}
+
+# Function to create all package files (for backward compatibility)
+create_package_files() {
+    create_arch_package_files
+    create_debian_package_files
 }
 
 # Run main function
