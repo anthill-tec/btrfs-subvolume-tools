@@ -187,10 +187,6 @@ See the man pages for detailed instructions for different boot loaders (GRUB, rE
 - snap-pac (optional, for pacman hooks on Arch Linux)
 - Optionally pandoc (for man page generation)
 
-## License
-
-This project is licensed under the GNU General Public License v3.0 - see the LICENSE file for details.
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
@@ -200,3 +196,45 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 3. Commit your changes: `git commit -m 'Add some amazing feature'`
 4. Push to the branch: `git push origin feature/amazing-feature`
 5. Open a Pull Request
+
+## Documentation
+
+The project includes comprehensive documentation to help users and developers:
+
+### User Documentation
+
+- **README.md** - This file, provides an overview, installation instructions, and basic usage
+- **Man Pages** - Detailed command-line documentation (install with `make man`)
+  - `man create-subvolume` - Complete guide for the create-subvolume tool
+  - `man configure-snapshots` - Complete guide for the configure-snapshots tool
+
+### Developer Documentation
+
+- **[DEV_GUIDE.md](docs/DEV_GUIDE.md)** - Comprehensive developer guide covering:
+  - Build system and Makefile targets
+  - Package creation for different distributions
+  - Testing framework
+  - Environment variables and customization options
+  - Cross-distribution packaging support
+
+### Package Building
+
+The project supports building packages for different Linux distributions:
+
+```bash
+# Build package for detected system
+make pkg
+
+# Build specific package types
+make pkg-arch    # Arch Linux package
+make pkg-deb     # Debian package
+
+# Customize package metadata
+make pkg-arch MAINTAINER_NAME="Your Name" MAINTAINER_EMAIL="your.email@example.com"
+```
+
+See the [DEV_GUIDE.md](docs/DEV_GUIDE.md) for detailed information about package building options and customization.
+
+## License
+
+This project is licensed under the GNU General Public License v3.0 - see the LICENSE file for details.

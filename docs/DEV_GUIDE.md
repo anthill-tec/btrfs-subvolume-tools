@@ -393,6 +393,9 @@ The build system respects several environment variables:
 | `DESTDIR` | Destination directory for staged installation | (empty) |
 | `DEBUG` | Enable debug output | (unset) |
 | `PROJECT_NAME` | Project name for logging | (project specific) |
+| `MAINTAINER_NAME` | Package maintainer's name | `Antony John` |
+| `MAINTAINER_EMAIL` | Package maintainer's email | `still.duck5711@fastmail.com` |
+| `VERSION` | Package version | `1.0.0` |
 
 Example usage:
 
@@ -402,7 +405,50 @@ make install DESTDIR=/tmp/stage PREFIX=/usr
 
 # Enable debug output for tests
 DEBUG=true sudo make test
+
+# Build a package with custom maintainer information
+make pkg-arch MAINTAINER_NAME="Your Name" MAINTAINER_EMAIL="your.email@example.com"
 ```
+
+### Package Building Options
+
+The build system provides flexible options for creating distribution packages:
+
+#### Cross-Distribution Package Building
+
+You can build packages for different distributions regardless of your host system:
+
+```bash
+# Build an Arch package on any system
+make pkg-arch
+
+# Build a Debian package on any system
+make pkg-deb
+```
+
+The Debian package building includes a fallback mechanism that will create a simplified package when the full Debian build dependencies aren't available.
+
+#### Customizing Package Metadata
+
+You can customize various aspects of the package metadata:
+
+```bash
+# Custom version
+make pkg VERSION=1.1.0
+
+# Custom maintainer information
+make pkg-arch MAINTAINER_NAME="Your Name" MAINTAINER_EMAIL="your.email@example.com"
+
+# Combined options
+make pkg-deb VERSION=1.1.0 MAINTAINER_NAME="Your Name" MAINTAINER_EMAIL="your.email@example.com"
+```
+
+#### Package Output Location
+
+All built packages are placed in the `.dist` directory:
+
+- Arch packages: `.dist/btrfs-subvolume-tools-<version>-<release>-any.pkg.tar.zst`
+- Debian packages: `.dist/btrfs-subvolume-tools_<version>_all.deb`
 
 ## Troubleshooting
 
