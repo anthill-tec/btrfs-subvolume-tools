@@ -130,7 +130,7 @@ debug-test:
 		echo "Please run: sudo make debug-test"; \
 		exit 1; \
 	fi
-	@DEBUG=true $(TESTDIR)/test-orchestrator.sh --debug --project-name="$(PROJECT_NAME)"
+	@DEBUG=true $(TESTDIR)/test-orchestrator.sh --debug $(if $(test-suite),--test-suite=$(test-suite),) $(if $(test-case),--test-case=$(test-case),) --project-name="$(PROJECT_NAME)"
 
 # Clean up test environment
 test-clean:

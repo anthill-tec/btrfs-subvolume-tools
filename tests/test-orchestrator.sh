@@ -478,19 +478,47 @@ main() {
         esac
     done
     
-    # If a specific test suite is specified, only run that one
-    if [ -n "$SPECIFIC_TEST" ]; then
-        log_phase 1 "Running specific test suite: $SPECIFIC_TEST"
-        if [ -n "$SPECIFIC_TEST_CASE" ]; then
+    # Handle test suite and test case filtering
+    if [ -n "$SPECIFIC_TEST" ] || [ -n "$SPECIFIC_TEST_CASE" ]; then
+        # Case 1: Both test suite and test case specified
+        if [ -n "$SPECIFIC_TEST" ] && [ -n "$SPECIFIC_TEST_CASE" ]; then
+            log_phase 1 "Running specific test suite: $SPECIFIC_TEST"
             log_phase 1 "Running specific test case: $SPECIFIC_TEST_CASE"
             run_tests "$DEBUG" "$SPECIFIC_TEST" "$SPECIFIC_TEST_CASE"
             exit $?
-        else
+        
+        # Case 2: Only test suite specified
+        elif [ -n "$SPECIFIC_TEST" ]; then
+            log_phase 1 "Running specific test suite: $SPECIFIC_TEST"
             run_tests "$DEBUG" "$SPECIFIC_TEST" ""
             exit $?
+        
+        # Case 3: Only test case specified
+        elif [ -n "$SPECIFIC_TEST_CASE" ]; then
+            log_phase 1 "Searching for test case: $SPECIFIC_TEST_CASE"
+            
+            # Discover test suites
+            mapfile -t TEST_SUITES < <(discover_test_suites)
+            
+            # Check each test suite for the specific test case
+            for test_suite in "${TEST_SUITES[@]}"; do
+                SUITE_NAME=$(get_simple_name "$test_suite")
+                
+                # Check if the test case exists in this test suite
+                if grep -q "test_$SPECIFIC_TEST_CASE" "$test_suite" 2>/dev/null; then
+                    log_phase 1 "Found test case in suite: $SUITE_NAME"
+                    log_phase 1 "Running specific test case: $SPECIFIC_TEST_CASE"
+                    run_tests "$DEBUG" "$SUITE_NAME" "$SPECIFIC_TEST_CASE"
+                    exit $?
+                fi
+            done
+            
+            log_phase 1 "Error: Test case '$SPECIFIC_TEST_CASE' not found in any test suite"
+            exit 1
         fi
     fi
     
+    # If no specific test suite or test case is specified, run all test suites
     # Discover test suites
     mapfile -t TEST_SUITES < <(discover_test_suites)
     
