@@ -1,4 +1,8 @@
-# Bash Project Developer Guide
+# Project Developer Guide (Trishul Tool Framework)
+
+The Trishul framework is a development environment for creating Bash script-based tools for Linux distributions. Use only if the tools require mission critical testing and is not advisable to test on the development host. It provides a containerized isolated environment for development and testing. The framework uses nspawn managed containers and require your machine having machinectl and nspawn installed. Refer [here](https://www.archlinux.org/packages/?name=machinectl) for more details and is subject to the limits of the nspawn system.
+
+That said you can cross build the tools on your development host for other distributions. The framework was developed on an arch based system.
 
 This comprehensive guide covers the development workflow, build system, and testing framework for Bash script-based tool projects.
 
@@ -404,7 +408,7 @@ Example usage:
 make install DESTDIR=/tmp/stage PREFIX=/usr
 
 # Enable debug output for tests
-DEBUG=true sudo make test
+sudo make debug-test
 
 # Build a package with custom maintainer information
 make pkg-arch MAINTAINER_NAME="Your Name" MAINTAINER_EMAIL="your.email@example.com"
