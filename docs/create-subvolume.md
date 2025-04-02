@@ -80,7 +80,7 @@ To properly create subvolumes on system mountpoints like /home, /var, etc., it's
 
 4. **Run the script**:
    ```
-   /path/to/create-subvolume.sh [OPTIONS]
+   create-subvolume.sh [OPTIONS]
    ```
 
 # EXAMPLES
