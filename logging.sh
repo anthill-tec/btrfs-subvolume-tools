@@ -28,8 +28,11 @@ init_logging() {
     local container_name="$1"
     local current_user="$2"
     
-    # Create log directory structure
-    LOG_DIR="tests/logs/$container_name"
+    # Get the script directory for absolute paths
+    local SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    
+    # Create log directory structure with absolute path
+    LOG_DIR="${SCRIPT_DIR}/tests/logs/$container_name"
     mkdir -p "$LOG_DIR"
     
     # Create and initialize the summary log
@@ -61,7 +64,7 @@ EOF
     if [ -n "$current_user" ] && [ "$current_user" != "root" ]; then
         # Change ownership of both the specific log directory and the parent logs directory
         chown -R "$current_user" "$LOG_DIR"
-        chown "$current_user" "tests/logs" 2>/dev/null || true
+        chown "$current_user" "${SCRIPT_DIR}/tests/logs" 2>/dev/null || true
     fi
     
     # Return the log directory
@@ -72,6 +75,9 @@ EOF
 log_phase() {
     local phase="$1"
     local message="$2"
+    
+    # Only log to files if LOG_DIR is set
+    # This ensures logging only happens after init_logging is called
     
     # Map phase number to log file
     local log_file
@@ -87,7 +93,7 @@ log_phase() {
         *) phase_color="${BOLD}" ;;
     esac
     
-    if [ "$DEBUG" = "true" ]; then
+    if [ "$DEBUG" = "true" ] && [ -n "$LOG_DIR" ]; then
         # Detailed logging in debug mode
         case "$phase" in
             1) log_file="$LOG_DIR/01_pre_installation.log" ;;
@@ -100,16 +106,28 @@ log_phase() {
                 return 1
                 ;;
         esac
-    else
+        
+        # Ensure the log directory exists
+        mkdir -p "$LOG_DIR" 2>/dev/null || true
+        
+        # Append message to the phase log
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "$log_file"
+        
+        # Also add to summary
+        echo "[Phase $phase] $message" >> "$LOG_DIR/00_summary.log"
+    elif [ -n "$LOG_DIR" ]; then
         # In normal mode, log everything to the test_output file
         log_file="$LOG_DIR/test_output.log"
+        
+        # Ensure the log directory exists
+        mkdir -p "$LOG_DIR" 2>/dev/null || true
+        
+        # Append message to the test output log
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] [Phase $phase] $message" >> "$log_file"
+        
+        # Also add to summary
+        echo "[Phase $phase] $message" >> "$LOG_DIR/00_summary.log"
     fi
-    
-    # Append message to the phase log
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] $message" >> "$log_file"
-    
-    # Also add to summary
-    echo "[Phase $phase] $message" >> "$LOG_DIR/00_summary.log"
     
     # Print to console in both normal and debug modes
     echo -e "${phase_color}Phase $phase:${NC} $message"

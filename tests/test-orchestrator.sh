@@ -393,7 +393,7 @@ run_tests() {
     
     # Execute the command with the debug flag if needed and pass PROJECT_NAME
     run_cmd 4 "Running tests in container with /bin/bash" \
-        "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && PROJECT_NAME=\"$PROJECT_NAME\" ./test-bootstrap.sh $debug_arg ${specific_test:-} ${specific_test_case:-}'"
+        "machinectl shell \"$CONTAINER_NAME\" /bin/bash -c 'cd /root && PROJECT_NAME=\"$PROJECT_NAME\" LOG_DIR=\"$LOG_DIR\" ./test-bootstrap.sh $debug_arg ${specific_test:-} ${specific_test_case:-}'"
     
     # Get test exit code
     TEST_RESULT=$?

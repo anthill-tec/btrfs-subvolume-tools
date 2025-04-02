@@ -8,12 +8,17 @@
 # Default environment variables
 export DEBUG="${DEBUG:-false}"
 export PROJECT_NAME="${PROJECT_NAME:-Project}"
+export LOG_DIR="${LOG_DIR:-/var/log/tests}"
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
     case $1 in
         --debug)
             export DEBUG="true"
+            shift
+            ;;
+        --log-dir=*)
+            export LOG_DIR="${1#*=}"
             shift
             ;;
         *)
@@ -28,6 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 # Debug output to verify environment variables
 echo "DEBUG value in bootstrap: ${DEBUG:-not set}"
+echo "LOG_DIR value in bootstrap: ${LOG_DIR:-not set}"
 
 # Enable systemd services required for tests
 if command -v systemctl >/dev/null 2>&1; then
