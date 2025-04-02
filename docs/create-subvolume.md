@@ -1,5 +1,5 @@
 % CREATE-SUBVOLUME(8) v1.0 | System Administration Commands
-% 
+%
 % March 2025
 
 # NAME
@@ -43,42 +43,45 @@ This tool is particularly useful when setting up a new subvolume layout on an ex
 
 To properly create subvolumes on system mountpoints like /home, /var, etc., it's recommended to run this script from an emergency shell. This ensures no processes are using the target mountpoint during the operation.
 
-## Emergency Shell Preparation:
+## Emergency Shell Preparation
 
 1. **Boot to emergency shell**:
-   
+
    **For GRUB**:
-   
+
    - During the GRUB boot menu, press 'e' to edit the boot entry
    - Find the line starting with 'linux' or 'linux16'
    - Add `systemd.unit=emergency.target` to the end of this line
    - Press Ctrl+X or F10 to boot
 
    **For rEFInd**:
-   
+
    - At the rEFInd boot menu, select your Linux distribution
    - Press Tab or F2 to edit the boot options
    - Add `systemd.unit=emergency.target` to the options
    - Press Enter to boot
 
    **For systemd-boot**:
-   
+
    - At the systemd-boot menu, press 'e' to edit the selected entry
    - Add `systemd.unit=emergency.target` to the end of the kernel command line
    - Press Enter to boot with the modified options
    - Alternatively, for one-time use, you can hold the space bar during boot to enter the boot menu, select an entry, and press 'd' to add kernel parameters
 
 2. **Remount root filesystem as read-write**:
+
    ```
    mount -o remount,rw /
    ```
 
 3. **Ensure network if needed**:
+
    ```
    systemctl start systemd-networkd
    ```
 
 4. **Run the script**:
+
    ```
    create-subvolume.sh [OPTIONS]
    ```
@@ -86,21 +89,25 @@ To properly create subvolumes on system mountpoints like /home, /var, etc., it's
 # EXAMPLES
 
 Create a subvolume for /home with default settings:
+
 ```
 create-subvolume.sh
 ```
 
 Create a subvolume with backup:
+
 ```
 create-subvolume.sh --backup
 ```
 
 Create a subvolume for /var:
+
 ```
 create-subvolume.sh --target-mount /var --subvol-name @var
 ```
 
 Create a subvolume with custom backup location:
+
 ```
 create-subvolume.sh --backup --backup-drive /dev/sdc1 --backup-mount /mnt/mybackup
 ```
