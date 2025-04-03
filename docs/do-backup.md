@@ -1,14 +1,17 @@
 # do-backup.sh - BTRFS Backup Utility
 
 ## NAME
+
 do-backup.sh - Create backups of directories for BTRFS subvolume operations
 
 ## SYNOPSIS
-```
+
+```bash
 do-backup.sh [options]
 ```
 
 ## DESCRIPTION
+
 The `do-backup.sh` script is a versatile backup utility designed to create backups of directories, primarily for use with BTRFS subvolume operations. It supports multiple backup methods and provides flexible error handling options.
 
 The script automatically selects the most efficient backup method based on available system tools, with graceful fallback to simpler methods if dependencies are not met.
@@ -26,15 +29,15 @@ The script automatically selects the most efficient backup method based on avail
 
 * `-m, --method METHOD`  
   Specify the method for copying data:
-  - `tar`: Use tar with pv for compression and progress (requires: tar, pv)
-  - `parallel`: Use GNU parallel for multi-threaded copying (requires: parallel)
+  * `tar`: Use tar with pv for compression and progress (requires: tar, pv)
+  * `parallel`: Use GNU parallel for multi-threaded copying (requires: parallel)
   
   The script will automatically fall back to simpler methods if dependencies are not met.
 
 * `-e, --error-handling MODE`  
   Specify how to handle file copy errors:
-  - `strict`: Stop on first error (default)
-  - `continue`: Skip problem files and continue
+  * `strict`: Stop on first error (default)
+  * `continue`: Skip problem files and continue
 
 * `-n, --non-interactive`  
   Run without prompting for user input.
@@ -75,26 +78,29 @@ The script handles user interruptions (Ctrl+C) gracefully:
 ## EXAMPLES
 
 1. Basic backup:
-   ```
+
+   ```bash
    do-backup.sh --source /home/user --destination /mnt/backup/home
    ```
 
 2. Using parallel method with continue-on-error:
-   ```
+
+   ```bash
    do-backup.sh -s /var -d /mnt/backup/var --method=parallel --error-handling=continue
    ```
 
 3. Non-interactive backup:
-   ```
+
+   ```bash
    do-backup.sh -s /home/user -d /mnt/backup/home -n
    ```
 
 ## NOTES
 
-- The script automatically handles hidden files and directories.
-- When using the `--backup` flag with `create-subvolume.sh`, this script is called automatically.
-- The script uses reflink copies when possible (on BTRFS filesystems) for efficiency.
-- Empty source directories are handled gracefully, with a confirmation prompt in interactive mode.
+* The script automatically handles hidden files and directories.
+* When using the `--backup` flag with `create-subvolume.sh`, this script is called automatically.
+* The script uses reflink copies when possible (on BTRFS filesystems) for efficiency.
+* Empty source directories are handled gracefully, with a confirmation prompt in interactive mode.
 
 ## SEE ALSO
 

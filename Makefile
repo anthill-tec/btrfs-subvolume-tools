@@ -68,9 +68,11 @@ install: check-deps all
 	install -d $(DESTDIR)$(BINDIR)
 	install -m 0755 bin/create-subvolume.sh $(DESTDIR)$(BINDIR)/create-subvolume
 	install -m 0755 bin/configure-snapshots.sh $(DESTDIR)$(BINDIR)/configure-snapshots
+	install -m 0755 bin/do-backup.sh $(DESTDIR)$(BINDIR)/do-backup
 	install -d $(DESTDIR)$(MANDIR)/man8
 	install -m 0644 man/create-subvolume.8.gz $(DESTDIR)$(MANDIR)/man8/
 	install -m 0644 man/configure-snapshots.8.gz $(DESTDIR)$(MANDIR)/man8/
+	install -m 0644 man/do-backup.8.gz $(DESTDIR)$(MANDIR)/man8/
 	install -d $(DESTDIR)$(DOCDIR)
 	install -m 0644 README.md $(DESTDIR)$(DOCDIR)/
 	install -m 0644 CHANGELOG.md $(DESTDIR)$(DOCDIR)/
@@ -82,8 +84,10 @@ uninstall:
 	@echo "Note: If installed via package manager, use your package manager to uninstall."
 	rm -f $(DESTDIR)$(BINDIR)/create-subvolume
 	rm -f $(DESTDIR)$(BINDIR)/configure-snapshots
+	rm -f $(DESTDIR)$(BINDIR)/do-backup
 	rm -f $(DESTDIR)$(MANDIR)/man8/create-subvolume.8.gz
 	rm -f $(DESTDIR)$(MANDIR)/man8/configure-snapshots.8.gz
+	rm -f $(DESTDIR)$(MANDIR)/man8/do-backup.8.gz
 	rm -rf $(DESTDIR)$(DOCDIR)
 	rm -rf $(DESTDIR)$(CONFDIR)
 
@@ -93,6 +97,8 @@ man:
 	@gzip -f man/create-subvolume.8
 	@pandoc -s -t man docs/configure-snapshots.md -o man/configure-snapshots.8
 	@gzip -f man/configure-snapshots.8
+	@pandoc -s -t man docs/do-backup.md -o man/do-backup.8
+	@gzip -f man/do-backup.8
 
 docs/create-subvolume.8: docs/create-subvolume.md
 	pandoc -s -t man docs/create-subvolume.md -o docs/create-subvolume.8
@@ -105,6 +111,12 @@ docs/configure-snapshots.8: docs/configure-snapshots.md
 
 docs/configure-snapshots.8.gz: docs/configure-snapshots.8
 	gzip -f docs/configure-snapshots.8
+
+docs/do-backup.8: docs/do-backup.md
+	pandoc -s -t man docs/do-backup.md -o docs/do-backup.8
+
+docs/do-backup.8.gz: docs/do-backup.8
+	gzip -f docs/do-backup.8
 
 # Check for dependencies
 check-deps:
@@ -221,7 +233,8 @@ pkg-deb: pkg-files-deb
 						echo "Found source files in $$EXTRACT_DIR"; \
 						cp "$$EXTRACT_DIR/bin/create-subvolume.sh" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/create-subvolume"; \
 						cp "$$EXTRACT_DIR/bin/configure-snapshots.sh" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/configure-snapshots"; \
-						chmod 755 "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/create-subvolume" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/configure-snapshots"; \
+						cp "$$EXTRACT_DIR/bin/do-backup.sh" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/do-backup"; \
+						chmod 755 "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/create-subvolume" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/configure-snapshots" "$$ROOT_DIR/$(PKGDIR)/deb/usr/bin/do-backup"; \
 						if [ -d "$$EXTRACT_DIR/man" ] && [ -f "$$EXTRACT_DIR/man/create-subvolume.8.gz" ]; then \
 							cp "$$EXTRACT_DIR/man/"*.8.gz "$$ROOT_DIR/$(PKGDIR)/deb/usr/share/man/man8/"; \
 						fi; \
@@ -276,4 +289,5 @@ clean: test-clean
 	rm -rf man/
 	rm -f docs/create-subvolume.8*
 	rm -f docs/configure-snapshots.8*
+	rm -f docs/do-backup.8*
 	rm -rf $(PKGDIR)
