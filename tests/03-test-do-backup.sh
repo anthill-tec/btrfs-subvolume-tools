@@ -279,8 +279,12 @@ verify_backup() {
     local source_hidden_count=$(find "$source" -type f -path "*/\.*" 2>/dev/null | wc -l)
     local dest_hidden_count=$(find "$destination" -type f -path "*/\.*" 2>/dev/null | wc -l)
     
-    logInfo "Source has $source_count regular files and $source_hidden_count hidden files"
-    logInfo "Destination has $dest_count regular files and $dest_hidden_count hidden files"
+    # Count directories to verify directory structure
+    local source_dir_count=$(find "$source" -type d 2>/dev/null | wc -l)
+    local dest_dir_count=$(find "$destination" -type d 2>/dev/null | wc -l)
+    
+    logInfo "Source has $source_count regular files and $source_hidden_count hidden files in $source_dir_count directories"
+    logInfo "Destination has $dest_count regular files and $dest_hidden_count hidden files in $dest_dir_count directories"
     
     if [ "$expected_result" -eq 0 ]; then
         # For complete success, regular file counts should match
@@ -288,6 +292,9 @@ verify_backup() {
         
         # Hidden files should also be copied
         assertEquals "$source_hidden_count" "$dest_hidden_count" "Hidden file count should match between source and destination"
+        
+        # Directory structure should be preserved
+        assertEquals "$source_dir_count" "$dest_dir_count" "Directory count should match between source and destination"
         
         # Verify specific files with known content
         # Check JSON file
@@ -328,6 +335,51 @@ verify_backup() {
             local source_target=$(readlink "$source/script_link.sh")
             local dest_target=$(readlink "$destination/script_link.sh")
             assertEquals "$source_target" "$dest_target" "Symlink target should match"
+        fi
+        
+        # Verify deep directory structure and file integrity
+        # Check files in deep directories
+        for deep_path in "dir1/subdir1/deepdir1" "dir2/subdir2/deepdir2" "dir3/subdir3/deepdir3"; do
+            # Verify directory exists
+            assertDirExists "$destination/$deep_path" "Deep directory structure should be preserved"
+            
+            # Find a file in the deep directory to verify
+            local deep_file=$(find "$source/$deep_path" -type f -name "*.bin" | head -n 1)
+            if [ -n "$deep_file" ]; then
+                local deep_file_rel=${deep_file#$source/}
+                local source_md5=$(md5sum "$source/$deep_file_rel" | cut -d ' ' -f 1)
+                local dest_md5=$(md5sum "$destination/$deep_file_rel" | cut -d ' ' -f 1)
+                assertEquals "$source_md5" "$dest_md5" "Content of deep file $deep_file_rel should match"
+            fi
+        done
+        
+        # Verify directory permissions are preserved
+        for dir_path in "dir1" "config/settings" ".hidden_dir"; do
+            if [ -d "$source/$dir_path" ] && [ -d "$destination/$dir_path" ]; then
+                local source_perm=$(stat -c "%a" "$source/$dir_path")
+                local dest_perm=$(stat -c "%a" "$destination/$dir_path")
+                assertEquals "$source_perm" "$dest_perm" "Permissions of directory $dir_path should match"
+            fi
+        done
+        
+        # Verify recursive structure using find and sort
+        if [ "$expected_result" -eq 0 ] && command -v diff >/dev/null 2>&1; then
+            # Create temporary files for directory structure comparison
+            local source_structure=$(mktemp)
+            local dest_structure=$(mktemp)
+            
+            # Generate directory structure listings (relative paths)
+            find "$source" -type d | sed "s|^$source/||" | sort > "$source_structure"
+            find "$destination" -type d | sed "s|^$destination/||" | sort > "$dest_structure"
+            
+            # Compare directory structures
+            if ! diff -q "$source_structure" "$dest_structure" >/dev/null; then
+                logWarn "Directory structures differ between source and destination"
+                assertEquals "0" "1" "Directory structures should match between source and destination"
+            fi
+            
+            # Clean up temp files
+            rm -f "$source_structure" "$dest_structure"
         fi
     else
         # For partial success, destination should have some files but may not match source
@@ -515,39 +567,9 @@ test_large_files() {
 test_integration_with_create_subvolume() {
     test_init "Integration with create-subvolume.sh"
     
-    # Skip this test until we understand the integration better
-    logWarn "Skipping integration test until we understand the integration requirements better"
+    # Skip this test as it belongs in the create-subvolume test suite
+    logInfo "This integration test has been moved to the create-subvolume test suite"
     return 0
-    
-    # Prepare test data
-    prepare_test_data 10 50 false false || return 1
-    
-    # Find create-subvolume.sh script
-    local create_subvol_script=$(find / -path "*/bin/create-subvolume.sh" 2>/dev/null | head -n 1)
-    if [ -z "$create_subvol_script" ]; then
-        logError "Could not locate create-subvolume.sh"
-        return 1
-    fi
-    
-    # Run create-subvolume.sh with backup
-    logInfo "Running create-subvolume.sh with backup"
-    local output
-    output=$($create_subvol_script --backup --backup-drive "$SOURCE_DEVICE" \
-        --backup-mount "$SOURCE_MOUNT" --target-device "$DESTINATION_DEVICE" \
-        --target-mount "$DESTINATION_MOUNT" --subvol-name "@test" \
-        --backup-method=tar --non-interactive 2>&1)
-    local exit_code=$?
-    
-    # Check exit code - should be 0 for success
-    assertEquals 0 "$exit_code" "Exit code should be 0 for successful integration"
-    
-    # Verify subvolume was created
-    assert "btrfs subvolume list \"$DESTINATION_MOUNT\" | grep -q '@test'" "Subvolume @test should exist"
-    
-    # Verify data was copied to the subvolume
-    assertFileExists "$DESTINATION_MOUNT/@test/test_script.sh"
-    
-    test_finish
 }
 
 # Clean up after test

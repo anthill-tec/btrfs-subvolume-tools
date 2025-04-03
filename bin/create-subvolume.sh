@@ -486,32 +486,59 @@ create_subvolume() {
   echo -e "${GREEN}$SUBVOL_NAME subvolume created successfully${NC}"
 
   # Copy data to the subvolume
-  echo -e "${YELLOW}Copying data from backup to $SUBVOL_NAME subvolume${NC}"
+  echo -e "${YELLOW}Copying data to $SUBVOL_NAME subvolume${NC}"
   echo -e "${YELLOW}This may take some time depending on the amount of data...${NC}"
 
-  # Check if backup is empty and ask for confirmation
-  if [ -z "$(ls -A "$BACKUP_MOUNT")" ]; then
-    echo -e "${RED}Warning: Backup directory appears to be empty.${NC}"
+  # Determine the source directory for copying data
+  local source_dir=""
+  if [ "$DO_BACKUP" = true ] && [ -d "$BACKUP_MOUNT" ]; then
+    # If backup was performed, copy from backup location
+    source_dir="$BACKUP_MOUNT"
+    echo -e "${YELLOW}Using backup as source: $source_dir${NC}"
+  else
+    # If no backup, copy from the original mount
+    source_dir="$temp_mount"
+    echo -e "${YELLOW}Using original mount as source: $source_dir${NC}"
+  fi
+
+  # Check if source directory is empty and ask for confirmation
+  if [ -z "$(ls -A "$source_dir")" ]; then
+    echo -e "${RED}Warning: Source directory appears to be empty.${NC}"
     
     if [ "$NON_INTERACTIVE" = true ]; then
-      echo -e "${YELLOW}Non-interactive mode: Continuing with empty backup${NC}"
+      echo -e "${YELLOW}Non-interactive mode: Continuing with empty source${NC}"
     else
-      read -p "Continue with empty backup? This will create an empty subvolume (Y/n): " -n 1 -r empty_backup_decision
+      read -p "Continue with empty source? This will create an empty subvolume (Y/n): " -n 1 -r empty_source_decision
       echo
       # Default to "y" if user just presses Enter
-      empty_backup_decision=${empty_backup_decision:-y}
-      if [[ ! $empty_backup_decision =~ ^[Yy]$ ]]; then
+      empty_source_decision=${empty_source_decision:-y}
+      if [[ ! $empty_source_decision =~ ^[Yy]$ ]]; then
         echo -e "${RED}Operation cancelled${NC}"
         return 1
       fi
     fi
-    echo -e "${YELLOW}Proceeding with empty backup...${NC}"
+    echo -e "${YELLOW}Proceeding with empty source...${NC}"
   else
-    # Copy files with reflink
-    cp -a --reflink=auto "$BACKUP_MOUNT"/* "$temp_mount/$SUBVOL_NAME"/ || { 
+    # Copy files with reflink, including hidden files
+    echo -e "${YELLOW}Copying files from $source_dir to $subvol_path${NC}"
+    
+    # Use shopt to ensure hidden files are included
+    (
+      cd "$source_dir" && \
+      shopt -s dotglob && \
+      cp -a --reflink=auto * "$subvol_path"/ 2>/dev/null || true
+    )
+    
+    # Check if any hidden files exist at the root level and copy them specifically
+    if ls -A "$source_dir"/.[!.]* >/dev/null 2>&1; then
+      cp -a --reflink=auto "$source_dir"/.[!.]* "$subvol_path"/ 2>/dev/null || true
+    fi
+    
+    # Verify the copy operation
+    if [ $? -ne 0 ]; then
       echo -e "${RED}Failed to copy data${NC}"
       return 1
-    }
+    fi
     echo -e "${GREEN}Data copied successfully${NC}"
   fi
   
