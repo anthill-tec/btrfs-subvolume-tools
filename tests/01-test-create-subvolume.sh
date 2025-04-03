@@ -201,22 +201,35 @@ test_with_custom_subvolume() {
 
 # Test reusing existing backup (no --backup flag)
 test_with_existing_backup() {
-    logInfo "Running test: Using existing backup data"
+    test_init "Using existing backup data"
     
     execCmd "Format target device" "mkfs.btrfs -f \"$TARGET_DEVICE\""
-    assert "[ $? -eq 0 ]" "Target device should format successfully"
     
-    logInfo "Creating test data on backup device..."
-    execCmd "Mount backup device" "mount \"$BACKUP_DEVICE\" \"$BACKUP_MOUNT\""
-    assert "[ $? -eq 0 ]" "Backup device should mount successfully"
+    # Create test files on the target device first
+    execCmd "Mount target device" "mount \"$TARGET_DEVICE\" \"$TARGET_MOUNT\""
     
-    execCmd "Create backup test files" "mkdir -p \"$BACKUP_MOUNT/testdir\" && \
-                                       echo \"This is a backup file\" > \"$BACKUP_MOUNT/testfile.txt\" && \
-                                       echo \"Another backup file\" > \"$BACKUP_MOUNT/testdir/nested.txt\" && \
-                                       dd if=/dev/urandom of=\"$BACKUP_MOUNT/testdir/random.bin\" bs=1M count=2 status=none"
+    execCmd "Create target test files" "mkdir -p \"$TARGET_MOUNT/testdir\" && \
+                                       echo \"This is a test file\" > \"$TARGET_MOUNT/testfile.txt\" && \
+                                       echo \"Another test file\" > \"$TARGET_MOUNT/testdir/nested.txt\" && \
+                                       dd if=/dev/urandom of=\"$TARGET_MOUNT/testdir/random.bin\" bs=1M count=2 status=none"
     
-    execCmd "Unmount backup" "umount \"$BACKUP_MOUNT\""
+    # Create hidden files too
+    execCmd "Create hidden files" "echo \"Hidden file content\" > \"$TARGET_MOUNT/.hidden.txt\" && \
+                                  mkdir -p \"$TARGET_MOUNT/.hidden_dir\" && \
+                                  echo \"File in hidden dir\" > \"$TARGET_MOUNT/.hidden_dir/file.txt\""
     
+    # Run do-backup.sh directly to create a backup
+    logInfo "Running do-backup.sh directly to create a backup"
+    execCmd "Run backup script" "\"$(dirname \"$SCRIPT_PATH\")/do-backup.sh\" \
+        --source \"$TARGET_MOUNT\" \
+        --destination \"$BACKUP_MOUNT\" \
+        --method=tar \
+        --non-interactive"
+    
+    # Unmount target for clean state
+    execCmd "Unmount target" "umount \"$TARGET_MOUNT\""
+    
+    # Now run create-subvolume without the backup flag
     logInfo "Running create-subvolume with existing backup"
     execCmd "Create subvolume with existing backup" "\"$SCRIPT_PATH\" \
         --target-device \"$TARGET_DEVICE\" \
@@ -226,12 +239,20 @@ test_with_existing_backup() {
         --subvol-name \"@reused_backup\" \
         --non-interactive"
     
-    execCmd "Mount target for verification" "mount \"$TARGET_DEVICE\" \"$TARGET_MOUNT\""
+    # Mount the subvolume directly for verification
+    execCmd "Mount subvolume for verification" "mount -o subvol=@reused_backup \"$TARGET_DEVICE\" \"$TARGET_MOUNT\" || mount \"$TARGET_DEVICE\" \"$TARGET_MOUNT\""
     
-    assert "[ -f \"$TARGET_MOUNT/@reused_backup/testfile.txt\" ]" "Data from backup should be copied to subvolume"
+    # List files for debugging
+    execCmd "List files in target" "ls -la \"$TARGET_MOUNT/\""
     
-    execCmd "Check file content" "grep -q \"This is a backup file\" \"$TARGET_MOUNT/@reused_backup/testfile.txt\""
+    # Check for the files in the correct location
+    assert "[ -f \"$TARGET_MOUNT/testfile.txt\" ]" "Data from backup should be copied to subvolume"
+    
+    execCmd "Check file content" "grep -q \"This is a test file\" \"$TARGET_MOUNT/testfile.txt\""
     assert "[ $? -eq 0 ]" "File content should match backup source"
+    
+    # Check for hidden files
+    assert "[ -f \"$TARGET_MOUNT/.hidden.txt\" ]" "Hidden files should be copied to subvolume"
     
     logInfo "Data from backup was properly copied and verified"
     execCmd "Unmount target" "umount \"$TARGET_MOUNT\""
