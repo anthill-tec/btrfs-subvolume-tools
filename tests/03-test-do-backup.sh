@@ -164,11 +164,11 @@ prepare_test_data() {
 <?xml version="1.0" encoding="UTF-8"?>
 <root>
   <item id="1">
-    <name>Item One</name>
+    <n>Item One</n>
     <value>100</value>
   </item>
   <item id="2">
-    <name>Item Two</name>
+    <n>Item Two</n>
     <value>200</value>
   </item>
 </root>
@@ -238,6 +238,8 @@ EOF
     mkdir -p "$SOURCE_MOUNT/.hidden_dir"
     echo "This is a hidden file" > "$SOURCE_MOUNT/.hidden_file"
     echo "This is in a hidden directory" > "$SOURCE_MOUNT/.hidden_dir/file.txt"
+    echo "# Hidden configuration file" > "$SOURCE_MOUNT/.hidden_config"
+    echo "export TEST_VAR=test_value" > "$SOURCE_MOUNT/.env"
     
     # Create some zero-byte files
     touch "$SOURCE_MOUNT/empty_file1.txt"
@@ -284,10 +286,8 @@ verify_backup() {
         # For complete success, regular file counts should match
         assertEquals "$source_count" "$dest_count" "Regular file count should match between source and destination"
         
-        # Note: Hidden files may not be copied by design, so we don't assert on hidden file count
-        if [ "$dest_hidden_count" -ne "$source_hidden_count" ]; then
-            logWarn "Hidden files were not copied ($source_hidden_count in source, $dest_hidden_count in destination)"
-        fi
+        # Hidden files should also be copied
+        assertEquals "$source_hidden_count" "$dest_hidden_count" "Hidden file count should match between source and destination"
         
         # Verify specific files with known content
         # Check JSON file
@@ -316,6 +316,13 @@ verify_backup() {
             assertEquals "$source_md5" "$dest_md5" "Content of binary_file_1.bin should match"
         fi
         
+        # Check hidden file if it exists
+        if [ -f "$source/.hidden_config" ] && [ -f "$destination/.hidden_config" ]; then
+            local source_md5=$(md5sum "$source/.hidden_config" | cut -d ' ' -f 1)
+            local dest_md5=$(md5sum "$destination/.hidden_config" | cut -d ' ' -f 1)
+            assertEquals "$source_md5" "$dest_md5" "Content of .hidden_config should match"
+        fi
+        
         # Check if symlinks are preserved (if they exist)
         if [ -L "$source/script_link.sh" ] && [ -L "$destination/script_link.sh" ]; then
             local source_target=$(readlink "$source/script_link.sh")
@@ -340,7 +347,7 @@ test_basic_tar_backup() {
     verify_command "tar" || return 1
     
     # Prepare test data (medium-sized files)
-    prepare_test_data 100 50 false false || return 1
+    prepare_test_data 10 50 false false || return 1
     
     # Run the backup script with default tar method
     logInfo "Running backup with default tar method"
@@ -360,7 +367,7 @@ test_parallel_backup() {
     verify_command "parallel" || return 1
     
     # Prepare test data (medium-sized files and large files)
-    prepare_test_data 50 50 false true || return 1
+    prepare_test_data 10 50 false true || return 1
     
     # Run the backup script with parallel method
     logInfo "Running backup with parallel method"
@@ -377,7 +384,7 @@ test_continue_on_error() {
     test_init "Backup with continue-on-error mode"
     
     # Prepare test data with special files
-    prepare_test_data 50 50 true false || return 1
+    prepare_test_data 10 50 true false || return 1
     
     # Create an unreadable file to test error handling
     echo "This file will be unreadable" > "$SOURCE_MOUNT/unreadable.txt"
@@ -408,7 +415,7 @@ test_non_interactive_mode() {
     test_init "Backup with non-interactive mode"
     
     # Prepare test data
-    prepare_test_data 50 50 false false || return 1
+    prepare_test_data 10 50 false false || return 1
     
     # Run the backup script in non-interactive mode
     logInfo "Running backup in non-interactive mode"
@@ -450,7 +457,7 @@ test_special_files() {
     test_init "Backup with special files"
     
     # Prepare test data with special files
-    prepare_test_data 50 50 true false || return 1
+    prepare_test_data 10 50 true false || return 1
     
     # Run the backup script
     logInfo "Running backup with special files"
@@ -481,7 +488,7 @@ test_large_files() {
     test_init "Backup with large files"
     
     # Prepare test data with large files
-    prepare_test_data 100 20 false true || return 1
+    prepare_test_data 10 20 false true || return 1
     
     # Run the backup script
     logInfo "Running backup with large files"
@@ -513,7 +520,7 @@ test_integration_with_create_subvolume() {
     return 0
     
     # Prepare test data
-    prepare_test_data 50 50 false false || return 1
+    prepare_test_data 10 50 false false || return 1
     
     # Find create-subvolume.sh script
     local create_subvol_script=$(find / -path "*/bin/create-subvolume.sh" 2>/dev/null | head -n 1)

@@ -217,7 +217,10 @@ copy_data() {
                 local error_log=$(mktemp)
                 
                 # Start cp in background with error logging
+                # Copy all files including hidden ones
+                shopt -s dotglob
                 cp -a --reflink=auto "$source"/* "$destination"/ 2>"$error_log" & 
+                shopt -u dotglob
                 CP_PID=$!
                 progress -mp $CP_PID
                 wait $CP_PID
@@ -233,7 +236,10 @@ copy_data() {
                 fi
             else
                 # Use cp with strict error handling
+                # Copy all files including hidden ones
+                shopt -s dotglob
                 cp -a --reflink=auto "$source"/* "$destination"/ & 
+                shopt -u dotglob
                 CP_PID=$!
                 progress -mp $CP_PID
                 wait $CP_PID || { 
@@ -247,8 +253,10 @@ copy_data() {
                 # Use cp with error handling that continues on errors
                 local error_log=$(mktemp)
                 
-                # Copy with error logging
+                # Copy with error logging - include hidden files
+                shopt -s dotglob
                 cp -a --reflink=auto "$source"/* "$destination"/ 2>"$error_log" || true
+                shopt -u dotglob
                 
                 # Check for errors in the log
                 if [ -s "$error_log" ]; then
@@ -261,10 +269,13 @@ copy_data() {
                 fi
             else
                 # Use cp with strict error handling
+                # Copy all files including hidden ones
+                shopt -s dotglob
                 cp -a --reflink=auto "$source"/* "$destination"/ || { 
                     echo -e "${RED}Failed to copy data${NC}"
                     return 1
                 }
+                shopt -u dotglob
             fi
             ;;
     esac
