@@ -6,7 +6,7 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+NC='\033[0m'  # No Color
 
 # Global variables for configuration
 BACKUP_DRIVE="/dev/sdb3"
@@ -16,9 +16,12 @@ TARGET_MOUNT="/home"
 SUBVOL_NAME="@home"
 DO_BACKUP=false
 NON_INTERACTIVE=false
-
-# Global variable to store temporary mount point
+BACKUP_METHOD="tar"
+ACTUAL_BACKUP_METHOD=""
+CURRENT_PHASE=""
 TEMP_MOUNT_PATH=""
+ERROR_HANDLING="strict"
+FAILED_FILES=()
 
 #
 # Utility functions
@@ -39,12 +42,23 @@ show_help() {
   echo "  -p, --target-mount PATH    Target mount point (default: $TARGET_MOUNT)"
   echo "  -s, --subvol-name NAME     Subvolume name (default: $SUBVOL_NAME)"
   echo "  -n, --non-interactive      Run without prompting for user input"
+  echo "  --backup-method=METHOD     Specify the method for copying data:"
+  echo "                             tar: Use tar with pv for compression and progress"
+  echo "                                  (requires: tar, pv)"
+  echo "                             parallel: Use GNU parallel for multi-threaded copying"
+  echo "                                  (requires: parallel)"
+  echo "                             (Automatically falls back if dependencies not met)"
+  echo "  --error-handling=MODE      Specify how to handle file copy errors:"
+  echo "                             strict: Stop on first error (default)"
+  echo "                             continue: Skip problem files and continue"
   echo
   echo "Example:"
   echo "  $0 --backup --backup-drive /dev/sdc1 --subvol-name @myhome"
   echo "  $0 --target-mount /var --subvol-name @var"
   echo "  $0 -b -d /dev/sdc1 -s @myhome"
   echo "  $0 -p /var -s @var -n"
+  echo "  $0 -b --backup-method=parallel -s @myhome"
+  echo "  $0 -b --error-handling=continue -s @myhome"
   echo
 }
 
@@ -223,6 +237,7 @@ update_fstab() {
 
 # Phase 1: Check environment and prerequisites
 check_prerequisites() {
+  CURRENT_PHASE="prerequisites"
   echo -e "${BLUE}Phase 1: Checking prerequisites${NC}"
   
   # Check if running as root
@@ -254,94 +269,74 @@ check_prerequisites() {
 
 # Phase 2: Handle backup
 handle_backup() {
+  CURRENT_PHASE="backup"
   echo -e "${BLUE}Phase 2: Handling backup${NC}"
   
-  # Create backup mount directory if it doesn't exist
-  if [ ! -d "$BACKUP_MOUNT" ]; then
-    echo -e "${YELLOW}Creating $BACKUP_MOUNT directory${NC}"
-    mkdir -p "$BACKUP_MOUNT"
-  fi
-
-  # Mount the backup drive if it's not already mounted
-  if ! mountpoint -q "$BACKUP_MOUNT"; then
-    echo -e "${YELLOW}Mounting backup drive to $BACKUP_MOUNT${NC}"
-    mount "$BACKUP_DRIVE" "$BACKUP_MOUNT" || { 
-      echo -e "${RED}Failed to mount backup drive${NC}"
-      exit 1
-    }
-    echo -e "${GREEN}Backup drive mounted successfully${NC}"
-  else
-    echo -e "${GREEN}Backup drive already mounted at $BACKUP_MOUNT${NC}"
-  fi
-
-  # Handle based on backup setting
-  if [ "$DO_BACKUP" = true ]; then
-    # Mount target for backup if needed
-    echo -e "${YELLOW}Checking if target mount is ready for backup...${NC}"
-    mount_target_if_needed "$TARGET_MOUNT" "$TARGET_DEVICE" || {
-      echo -e "${RED}Cannot proceed with backup without properly mounted target${NC}"
-      exit 1
-    }
-    
-    # Verify that target filesystem is btrfs
-    FS_TYPE=$(findmnt -n -o FSTYPE "$TARGET_MOUNT")
-    if [ "$FS_TYPE" != "btrfs" ]; then
-      echo -e "${RED}Error: $TARGET_MOUNT is not a btrfs filesystem (found: $FS_TYPE)${NC}"
-      exit 1
-    fi
-    
-    # Perform backup
-    echo -e "${YELLOW}Starting backup of $TARGET_MOUNT to $BACKUP_MOUNT${NC}"
-    echo -e "${YELLOW}This may take a long time depending on the amount of data...${NC}"
-    
-    # Create timestamp for backup
-    TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-    BACKUP_DIR="$BACKUP_MOUNT/backup_$TIMESTAMP"
-    mkdir -p "$BACKUP_DIR"
-    
-    # Check if directory is empty first
-    if [ "$(ls -A "$TARGET_MOUNT" 2>/dev/null)" ]; then
-      # Directory has files, copy them
-      cp -a --reflink=auto "$TARGET_MOUNT"/* "$BACKUP_DIR"/ || { 
-        echo -e "${RED}Backup failed${NC}"
-        exit 1
-      }
-      echo -e "${GREEN}Backup completed successfully to $BACKUP_DIR${NC}"
-    else
-      # Directory is empty, nothing to copy
-      echo -e "${YELLOW}Source directory $TARGET_MOUNT is empty, no files to backup${NC}"
-      echo -e "${GREEN}Empty backup directory created at $BACKUP_DIR${NC}"
-    fi
-    
-    # Update backup path to use the new timestamped backup
-    BACKUP_SOURCE="$BACKUP_DIR"
-  else
-    # Use existing backup
-    echo -e "${YELLOW}Using existing backup at $BACKUP_MOUNT${NC}"
-    BACKUP_SOURCE="$BACKUP_MOUNT"
-    
-    # Verify backup is actually there
-    if [ ! "$(ls -A "$BACKUP_SOURCE" 2>/dev/null)" ]; then
-      echo -e "${YELLOW}Warning: Backup directory appears to be empty.${NC}"
-      
-      if [ "$NON_INTERACTIVE" = true ]; then
-        echo -e "${YELLOW}Non-interactive mode: Continuing with empty backup${NC}"
-      else
-        read -p "Continue with empty backup? This will create an empty subvolume (y/n): " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-          echo -e "${RED}Operation cancelled${NC}"
-          exit 1
-        fi
-      fi
-    fi
+  # Skip if backup is not requested
+  if [ "$DO_BACKUP" != true ]; then
+    echo -e "${YELLOW}Backup not requested, skipping...${NC}"
+    return 0
   fi
   
-  echo -e "${GREEN}Backup handling completed${NC}"
+  # Call the do-backup.sh script
+  echo -e "${YELLOW}Calling do-backup.sh to perform backup${NC}"
+  
+  # Build the command with all relevant options
+  local backup_cmd="$(dirname "$0")/do-backup.sh"
+  backup_cmd+=" --source $TARGET_MOUNT"
+  backup_cmd+=" --destination $BACKUP_MOUNT"
+  
+  # Pass through relevant options
+  if [ "$BACKUP_METHOD" != "tar" ]; then
+    backup_cmd+=" --method=$BACKUP_METHOD"
+  fi
+  
+  if [ "$ERROR_HANDLING" != "strict" ]; then
+    backup_cmd+=" --error-handling=$ERROR_HANDLING"
+  fi
+  
+  if [ "$NON_INTERACTIVE" = true ]; then
+    backup_cmd+=" --non-interactive"
+  fi
+  
+  # Execute the backup command
+  echo -e "${YELLOW}Executing: $backup_cmd${NC}"
+  eval "$backup_cmd"
+  local backup_status=$?
+  
+  # Handle the backup result
+  case $backup_status in
+    0)
+      echo -e "${GREEN}Backup completed successfully${NC}"
+      ;;
+    2)
+      echo -e "${YELLOW}Backup completed with some files skipped${NC}"
+      if [ "$NON_INTERACTIVE" = true ]; then
+        echo -e "${YELLOW}Non-interactive mode: Continuing despite skipped files${NC}"
+      else
+        read -p "Continue with subvolume creation despite skipped files? (Y/n): " -n 1 -r continue_decision
+        echo
+        # Default to "y" if user just presses Enter
+        continue_decision=${continue_decision:-y}
+        if [[ ! $continue_decision =~ ^[Yy]$ ]]; then
+          echo -e "${RED}Operation cancelled${NC}"
+          return 1
+        fi
+      fi
+      ;;
+    *)
+      echo -e "${RED}Backup failed with status $backup_status${NC}"
+      return 1
+      ;;
+  esac
+  
+  echo -e "${GREEN}Backup phase completed${NC}"
+  return 0
 }
 
 # Phase 3: Prepare the target mount
 prepare_target() {
+  CURRENT_PHASE="prepare_target"
   echo -e "${BLUE}Phase 3: Preparing target mount${NC}"
   
   # Check if target is mounted
@@ -467,6 +462,7 @@ prepare_target() {
 
 # Phase 4: Create subvolume and copy data
 create_subvolume() {
+  CURRENT_PHASE="create_subvolume"
   local temp_mount="$1"
   
   echo -e "${BLUE}Phase 4: Creating subvolume and copying data${NC}"
@@ -494,7 +490,7 @@ create_subvolume() {
   echo -e "${YELLOW}This may take some time depending on the amount of data...${NC}"
 
   # Check if backup is empty and ask for confirmation
-  if [ -z "$(ls -A "$BACKUP_SOURCE")" ]; then
+  if [ -z "$(ls -A "$BACKUP_MOUNT")" ]; then
     echo -e "${RED}Warning: Backup directory appears to be empty.${NC}"
     
     if [ "$NON_INTERACTIVE" = true ]; then
@@ -512,7 +508,7 @@ create_subvolume() {
     echo -e "${YELLOW}Proceeding with empty backup...${NC}"
   else
     # Copy files with reflink
-    cp -a --reflink=auto "$BACKUP_SOURCE"/* "$temp_mount/$SUBVOL_NAME"/ || { 
+    cp -a --reflink=auto "$BACKUP_MOUNT"/* "$temp_mount/$SUBVOL_NAME"/ || { 
       echo -e "${RED}Failed to copy data${NC}"
       return 1
     }
@@ -525,6 +521,7 @@ create_subvolume() {
 
 # Phase 5: Update system configuration
 update_system_config() {
+  CURRENT_PHASE="update_system_config"
   echo -e "${BLUE}Phase 5: Updating system configuration${NC}"
   
   # Update fstab
@@ -539,6 +536,7 @@ update_system_config() {
 
 # Phase 6: Cleanup and finalize
 cleanup_and_finalize() {
+  CURRENT_PHASE="cleanup_and_finalize"
   local temp_mount="$1"
   
   echo -e "${BLUE}Phase 6: Cleanup and finalization${NC}"
@@ -573,7 +571,12 @@ main() {
   echo -e "  Subvolume Name:   ${YELLOW}$SUBVOL_NAME${NC}"
   echo -e "  Perform Backup:   ${YELLOW}$DO_BACKUP${NC}"
   echo -e "  Non-Interactive:  ${YELLOW}$NON_INTERACTIVE${NC}"
+  echo -e "  Backup Method:    ${YELLOW}$BACKUP_METHOD${NC}"
+  echo -e "  Error Handling:   ${YELLOW}$ERROR_HANDLING${NC}"
   echo
+  
+  # Set up global trap for clean cancellation
+  trap 'echo -e "${RED}Operation interrupted by user${NC}"; exit 1' INT TERM
   
   # Run through all phases in sequence
   check_prerequisites
@@ -634,6 +637,36 @@ parse_arguments() {
         ;;
       -n|--non-interactive)
         NON_INTERACTIVE=true
+        shift
+        ;;
+      --backup-method=*)
+        BACKUP_METHOD="${1#*=}"
+        # Validate the method
+        case "$BACKUP_METHOD" in
+            tar|parallel)
+                # Valid method
+                ;;
+            *)
+                echo -e "${RED}Error: Invalid backup method: $BACKUP_METHOD${NC}"
+                echo -e "${YELLOW}Valid methods: tar, parallel${NC}"
+                exit 1
+                ;;
+        esac
+        shift
+        ;;
+      --error-handling=*)
+        ERROR_HANDLING="${1#*=}"
+        # Validate the error handling mode
+        case "$ERROR_HANDLING" in
+            strict|continue)
+                # Valid mode
+                ;;
+            *)
+                echo -e "${RED}Error: Invalid error handling mode: $ERROR_HANDLING${NC}"
+                echo -e "${YELLOW}Valid modes: strict, continue${NC}"
+                exit 1
+                ;;
+        esac
         shift
         ;;
       *)
