@@ -22,6 +22,8 @@ CURRENT_PHASE=""
 TEMP_MOUNT_PATH=""
 ERROR_HANDLING="strict"
 FAILED_FILES=()
+# Additional backup options
+BACKUP_EXTRA_OPTS=""
 
 #
 # Utility functions
@@ -42,6 +44,8 @@ show_help() {
   echo "  -p, --target-mount PATH    Target mount point (default: $TARGET_MOUNT)"
   echo "  -s, --subvol-name NAME     Subvolume name (default: $SUBVOL_NAME)"
   echo "  -n, --non-interactive      Run without prompting for user input"
+  echo
+  echo "Backup options:"
   echo "  --backup-method=METHOD     Specify the method for copying data:"
   echo "                             tar: Use tar with pv for compression and progress"
   echo "                                  (requires: tar, pv)"
@@ -51,14 +55,14 @@ show_help() {
   echo "  --error-handling=MODE      Specify how to handle file copy errors:"
   echo "                             strict: Stop on first error (default)"
   echo "                             continue: Skip problem files and continue"
+  echo "  --backup-extra-opts=\"OPTS\" Additional options to pass to the backup command"
+  echo "                             (Use with caution, options are passed directly)"
   echo
-  echo "Example:"
-  echo "  $0 --backup --backup-drive /dev/sdc1 --subvol-name @myhome"
+  echo "Examples:"
+  echo "  $0 --backup"
   echo "  $0 --target-mount /var --subvol-name @var"
-  echo "  $0 -b -d /dev/sdc1 -s @myhome"
-  echo "  $0 -p /var -s @var -n"
-  echo "  $0 -b --backup-method=parallel -s @myhome"
-  echo "  $0 -b --error-handling=continue -s @myhome"
+  echo "  $0 --backup --backup-drive /dev/sdc1 --backup-mount /mnt/mybackup"
+  echo "  $0 --backup --backup-method=parallel --error-handling=continue"
   echo
 }
 
@@ -297,6 +301,11 @@ handle_backup() {
   
   if [ "$NON_INTERACTIVE" = true ]; then
     backup_cmd+=" --non-interactive"
+  fi
+  
+  # Pass any additional backup options
+  if [ -n "$BACKUP_EXTRA_OPTS" ]; then
+    backup_cmd+=" $BACKUP_EXTRA_OPTS"
   fi
   
   # Execute the backup command
@@ -600,6 +609,7 @@ main() {
   echo -e "  Non-Interactive:  ${YELLOW}$NON_INTERACTIVE${NC}"
   echo -e "  Backup Method:    ${YELLOW}$BACKUP_METHOD${NC}"
   echo -e "  Error Handling:   ${YELLOW}$ERROR_HANDLING${NC}"
+  echo -e "  Backup Extra Options: ${YELLOW}$BACKUP_EXTRA_OPTS${NC}"
   echo
   
   # Set up global trap for clean cancellation
@@ -694,6 +704,10 @@ parse_arguments() {
                 exit 1
                 ;;
         esac
+        shift
+        ;;
+      --backup-extra-opts=*)
+        BACKUP_EXTRA_OPTS="${1#*=}"
         shift
         ;;
       *)

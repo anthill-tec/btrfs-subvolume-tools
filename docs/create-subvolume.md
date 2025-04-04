@@ -39,6 +39,28 @@ This tool is particularly useful when setting up a new subvolume layout on an ex
 **-s, --subvol-name** *NAME*
 : Specify subvolume name (default: @home)
 
+**-n, --non-interactive**
+: Run without prompting for user input
+
+### Backup Options
+
+**--backup-method=METHOD**
+: Specify the method for copying data:
+
+- `tar`: Use tar with pv for compression and progress (requires: tar, pv)
+- `parallel`: Use GNU parallel for multi-threaded copying (requires: parallel)
+- (Automatically falls back if dependencies not met)
+
+**--error-handling=MODE**
+: Specify how to handle file copy errors:
+
+- `strict`: Stop on first error (default)
+- `continue`: Skip problem files and continue
+
+**--backup-extra-opts="OPTS"**
+: Additional options to pass to the backup command
+  (Use with caution, options are passed directly to do-backup.sh)
+
 # RUNNING FROM EMERGENCY SHELL
 
 To properly create subvolumes on system mountpoints like /home, /var, etc., it's recommended to run this script from an emergency shell. This ensures no processes are using the target mountpoint during the operation.
@@ -110,6 +132,18 @@ Create a subvolume with custom backup location:
 
 ```
 create-subvolume.sh --backup --backup-drive /dev/sdc1 --backup-mount /mnt/mybackup
+```
+
+Create a subvolume with parallel backup method and continue on errors:
+
+```
+create-subvolume.sh --backup --backup-method=parallel --error-handling=continue
+```
+
+Create a subvolume with custom backup options:
+
+```
+create-subvolume.sh --backup --backup-extra-opts="--exclude=/home/user/tmp"
 ```
 
 # WORKFLOW
