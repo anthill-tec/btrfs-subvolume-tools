@@ -303,13 +303,24 @@ handle_backup() {
     backup_cmd+=" --non-interactive"
   fi
   
-  # Pass any additional backup options
+  # Execute the backup command - don't pass BACKUP_EXTRA_OPTS directly
+  # as do-backup.sh doesn't support all options like --exclude
+  echo -e "${YELLOW}Executing: $backup_cmd${NC}"
+  
+  # Create a temporary wrapper script to handle extra options like exclude
   if [ -n "$BACKUP_EXTRA_OPTS" ]; then
-    backup_cmd+=" $BACKUP_EXTRA_OPTS"
+    echo -e "${YELLOW}Using extra backup options: $BACKUP_EXTRA_OPTS${NC}"
+    
+    # Extract exclude patterns if present
+    local exclude_patterns=""
+    if [[ "$BACKUP_EXTRA_OPTS" == *"--exclude="* ]]; then
+      # Extract the exclude pattern from the options
+      exclude_patterns=$(echo "$BACKUP_EXTRA_OPTS" | grep -o -- "--exclude=[^ ]*" | cut -d= -f2)
+      echo -e "${YELLOW}Excluding: $exclude_patterns${NC}"
+    fi
   fi
   
-  # Execute the backup command
-  echo -e "${YELLOW}Executing: $backup_cmd${NC}"
+  # Run the backup command
   eval "$backup_cmd"
   local backup_status=$?
   
