@@ -243,7 +243,7 @@ pkg-deb: pkg-files-deb
 						echo "Section: admin" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo "Priority: optional" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo "Architecture: all" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
-						echo "Depends: bash, btrfs-progs, snapper" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
+						echo "Depends: bash, btrfs-progs, snapper, dialog" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo "Maintainer: $(MAINTAINER)" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo "Description: Tools for managing BTRFS subvolumes and snapshots" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \
 						echo " This package provides tools for creating and managing BTRFS subvolumes" >> "$$ROOT_DIR/$(PKGDIR)/deb/DEBIAN/control"; \

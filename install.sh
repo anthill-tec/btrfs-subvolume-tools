@@ -207,7 +207,7 @@ suggest_native_packaging() {
             echo ""
             echo "This will create and install a proper Arch package."
             echo ""
-            echo "Dependencies: bash, btrfs-progs, snapper"
+            echo "Dependencies: bash, btrfs-progs, snapper, dialog"
             echo "Optional: pandoc (for man page generation)"
             ;;
         debian)
@@ -223,7 +223,7 @@ suggest_native_packaging() {
             echo ""
             echo "This will create and install a proper Debian package."
             echo ""
-            echo "Dependencies: bash, btrfs-progs, snapper"
+            echo "Dependencies: bash, btrfs-progs, snapper, dialog"
             echo "Build-Dependencies: debhelper (>= 10), pandoc"
             ;;
         *)
@@ -269,7 +269,7 @@ pkgdesc="Tools for managing BTRFS subvolumes and snapshots"
 arch=('any')
 url="https://github.com/anthill-tec/btrfs-subvolume-tools"
 license=('MIT')
-depends=('bash' 'btrfs-progs' 'snapper')
+depends=('bash' 'btrfs-progs' 'snapper' 'dialog')
 makedepends=('pandoc')
 backup=('etc/btrfs-subvolume-tools/config')
 source=("$pkgname-$pkgver.tar.gz")
@@ -311,7 +311,7 @@ Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
 
 Package: btrfs-subvolume-tools
 Architecture: all
-Depends: bash, btrfs-progs, snapper
+Depends: bash, btrfs-progs, snapper, dialog
 Description: Tools for managing BTRFS subvolumes and snapshots
  This package provides tools for creating and managing BTRFS subvolumes
  and snapshots, including automated snapshot configuration.
@@ -574,7 +574,7 @@ pkgdesc="Tools for managing BTRFS subvolumes and snapshots"
 arch=('any')
 url="https://github.com/anthill-tec/btrfs-subvolume-tools"
 license=('GPL3')
-depends=('bash' 'btrfs-progs' 'snapper')
+depends=('bash' 'btrfs-progs' 'snapper' 'dialog')
 makedepends=('pandoc')
 backup=('etc/btrfs-subvolume-tools/config')
 source=("${PACKAGE_NAME}-${VERSION}.tar.gz")
@@ -628,7 +628,7 @@ Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
 
 Package: btrfs-subvolume-tools
 Architecture: all
-Depends: bash, btrfs-progs, snapper
+Depends: bash, btrfs-progs, snapper, dialog
 Description: Tools for managing BTRFS subvolumes and snapshots
  This package provides tools for creating and managing BTRFS subvolumes
  and snapshots, including automated snapshot configuration.

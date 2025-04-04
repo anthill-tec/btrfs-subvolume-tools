@@ -691,6 +691,59 @@ EOF
     test_finish
 }
 
+# Test the show-excluded option with a mock dialog
+test_show_excluded_option() {
+    test_init "Backup with show-excluded option"
+    
+    # Skip test if dialog is not installed
+    if ! command -v dialog >/dev/null 2>&1; then
+        logInfo "Skipping test_show_excluded_option: dialog is not installed"
+        return 0
+    fi
+    
+    # Prepare test data with various file types
+    prepare_test_data 5 10 false false || return 1
+    
+    # Create some specific files to exclude
+    mkdir -p "$SOURCE_MOUNT/logs"
+    echo "Log entry" > "$SOURCE_MOUNT/logs/app.log"
+    
+    mkdir -p "$SOURCE_MOUNT/temp"
+    echo "Temporary data" > "$SOURCE_MOUNT/temp/temp.tmp"
+    
+    mkdir -p "$SOURCE_MOUNT/cache"
+    dd if=/dev/urandom of="$SOURCE_MOUNT/cache/cache_data.bin" bs=1K count=10 2>/dev/null
+    
+    # Create a mock dialog command
+    local mock_dir="$TEST_DIR/mock"
+    mkdir -p "$mock_dir"
+    
+    cat > "$mock_dir/dialog" << 'EOF'
+#!/bin/bash
+# Mock dialog that always returns success and simulates selections
+echo "$@" > /dev/null
+exit 0
+EOF
+    chmod +x "$mock_dir/dialog"
+    
+    # Set environment variables to override dialog behavior
+    export PATH="$mock_dir:$PATH"
+    
+    # Run the backup with show-excluded option
+    logInfo "Running backup with show-excluded option"
+    $SCRIPT_PATH --source "$SOURCE_MOUNT" --destination "$DESTINATION_MOUNT" \
+        --exclude='*.log' --exclude='*.tmp' --exclude='cache/' --show-excluded
+    
+    local status=$?
+    assert "[ $status -eq 0 ]" "Backup with show-excluded option should succeed"
+    
+    # Verify some files were copied
+    local dest_files=$(find "$DESTINATION_MOUNT" -type f | wc -l)
+    assert "[ $dest_files -gt 0 ]" "Files should be copied to destination"
+    
+    test_finish
+}
+
 # Clean up after test
 teardown() {
     # Unmount test filesystems
