@@ -75,6 +75,75 @@ When using this option, the script provides a two-level selection interface:
 
 This hierarchical approach gives you fine-grained control over what gets excluded from your backup.
 
+#### Interactive UI Examples
+
+**Pattern Selection Screen:**
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ Exclude Patterns                                                        │
+│                                                                         │
+│ Select patterns to exclude (Space to toggle, Enter to confirm):         │
+│                                                                         │
+│    [X] *.log (15 files)                                                 │
+│    [X] *.tmp (8 files)                                                  │
+│    [X] cache/ (2 dirs, 42 files)                                        │
+│    [X] node_modules/ (5 dirs, 230 files)                                │
+│    [ ] *.bak (no matches)                                               │
+│                                                                         │
+│                                                                         │
+│                                                                         │
+│                                                                         │
+│                     <OK>                     <Cancel>                    │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+**File/Directory Selection Screen (for a specific pattern):**
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ Files/Directories for Pattern: *.log                                    │
+│                                                                         │
+│ Select items to exclude (Space to toggle, Enter to confirm):            │
+│                                                                         │
+│    [X] /home/user/project/logs/app.log                                  │
+│    [X] /home/user/project/logs/error.log                                │
+│    [ ] /home/user/project/logs/debug.log                                │
+│    [X] /home/user/project/src/output.log                                │
+│    [X] /home/user/project/tmp/build.log                                 │
+│                                                                         │
+│                                                                         │
+│                                                                         │
+│                     <OK>                     <Cancel>                    │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+**Exclusion Summary Screen:**
+
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│ Exclude Summary                                                         │
+│                                                                         │
+│ The backup will exclude:                                                │
+│                                                                         │
+│ - 7 directories                                                         │
+│ - 289 files                                                             │
+│                                                                         │
+│ Selected patterns will be applied to the backup process.                │
+│                                                                         │
+│                                                                         │
+│                               <OK>                                       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+#### UI Navigation Tips
+
+* Use **arrow keys** to navigate between items
+* Press **Space** to toggle selection of an item
+* Press **Enter** to confirm your selections and proceed
+* Press **Tab** to move between the list and the buttons
+* Press **Esc** to cancel the current dialog
+
 ### Examples
 
 ```bash
@@ -87,13 +156,22 @@ do-backup.sh -s /home/user -d /mnt/backup/home --exclude-from=exclude_patterns.t
 # Interactively select which files and directories to exclude
 do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='tmp/' --show-excluded
 
-# Example exclude_patterns.txt file:
+# Example exclude_patterns.txt file content:
 # *.log
 # *.tmp
 # cache/
 # node_modules/
 # .git/
 ```
+
+#### Dependencies
+
+The interactive exclude selection feature requires the `dialog` package to be installed:
+
+* On Arch Linux: `sudo pacman -S dialog`
+* On Debian/Ubuntu: `sudo apt install dialog`
+
+If `dialog` is not installed, the script will fall back to the non-interactive mode and display a warning message.
 
 ## BACKUP METHODS
 
