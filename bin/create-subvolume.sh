@@ -286,7 +286,38 @@ handle_backup() {
   echo -e "${YELLOW}Calling do-backup.sh to perform backup${NC}"
   
   # Build the command with all relevant options
-  local backup_cmd="$(dirname "$0")/do-backup.sh"
+  # First try with the same path format as the current script (with or without extension)
+  local script_name=$(basename "$0")
+  local script_dir=$(dirname "$0")
+  local backup_script_base="do-backup"
+  
+  # If current script has .sh extension, try with extension first, otherwise try without
+  if [[ "$script_name" == *.sh ]]; then
+    # Running from source - try with .sh extension first
+    if [ -x "${script_dir}/${backup_script_base}.sh" ]; then
+      local backup_cmd="${script_dir}/${backup_script_base}.sh"
+    elif [ -x "${script_dir}/${backup_script_base}" ]; then
+      local backup_cmd="${script_dir}/${backup_script_base}"
+    elif [ -x "/usr/bin/${backup_script_base}" ]; then
+      local backup_cmd="/usr/bin/${backup_script_base}"
+    else
+      echo -e "${RED}Error: Backup script not found at ${script_dir}/${backup_script_base}.sh or ${script_dir}/${backup_script_base} or /usr/bin/${backup_script_base}${NC}"
+      return 1
+    fi
+  else
+    # Running from installed package - try without extension first
+    if [ -x "${script_dir}/${backup_script_base}" ]; then
+      local backup_cmd="${script_dir}/${backup_script_base}"
+    elif [ -x "${script_dir}/${backup_script_base}.sh" ]; then
+      local backup_cmd="${script_dir}/${backup_script_base}.sh"
+    elif [ -x "/usr/bin/${backup_script_base}" ]; then
+      local backup_cmd="/usr/bin/${backup_script_base}"
+    else
+      echo -e "${RED}Error: Backup script not found at ${script_dir}/${backup_script_base} or ${script_dir}/${backup_script_base}.sh or /usr/bin/${backup_script_base}${NC}"
+      return 1
+    fi
+  fi
+  
   backup_cmd+=" --source $TARGET_MOUNT"
   backup_cmd+=" --destination $BACKUP_MOUNT"
   

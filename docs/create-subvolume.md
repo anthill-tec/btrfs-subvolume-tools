@@ -185,7 +185,7 @@ This script uses the btrfs reflink feature to efficiently copy data when both so
 
 # SEE ALSO
 
-btrfs(8), btrfs-subvolume(8), mount(8), fstab(5)
+btrfs(8), btrfs-subvolume(8), do-backup(8), mount(8), fstab(5)
 
 # AUTHOR
 
