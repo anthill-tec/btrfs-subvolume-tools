@@ -43,7 +43,7 @@ This developer guide covers both the build system for development and deployment
 
 ```bash
 project-root/
-├── bin/                  # Executable scripts
+├── bin/                  # Executable Tool scripts
 ├── docs/                 # Documentation
 │   ├── DEV_GUIDE.md      # This developer guide
 │   └── *.md              # Man page sources and other documentation
@@ -63,7 +63,7 @@ project-root/
 **Note about test framework:**
 
 - The test framework provides a structured approach to testing Bash scripts
-- Only create or modify test suite files (test-*.sh)
+- Only create or modify test suite files (NN-test-*.sh)
 - The framework scripts in tests/framework/ should not be modified
 - This architecture is designed to be reusable across multiple projects
 
@@ -215,20 +215,20 @@ Create a file in the `tests/` directory with a name following the pattern `test-
 #!/bin/bash
 # Test file for feature X
 
-# Optional setup function runs before tests
+# Optional setup function runs before each test case
 setup() {
     echo "Setting up test environment"
 }
 
-# Test functions start with test_
+# Optional teardown function runs after each test case
+teardown() {
+    echo "Cleaning up test environment"
+}
+
+# Test functions start with test_ prefix
 test_feature_works() {
     # Your test code here
     assert "[ 1 -eq 1 ]" "Basic assertion should pass"
-}
-
-# Optional teardown function runs after tests
-teardown() {
-    echo "Cleaning up test environment"
 }
 ```
 
