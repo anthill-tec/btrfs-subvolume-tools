@@ -114,7 +114,7 @@ This hierarchical approach gives you fine-grained control over what gets exclude
 │                                                                         │
 │                                                                         │
 │                                                                         │
-│                     <OK>                     <Cancel>                    │
+│                     <OK>                     <Cancel>                   │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -132,7 +132,7 @@ This hierarchical approach gives you fine-grained control over what gets exclude
 │ Selected patterns will be applied to the backup process.                │
 │                                                                         │
 │                                                                         │
-│                               <OK>                                       │
+│                               <OK>                                      │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
