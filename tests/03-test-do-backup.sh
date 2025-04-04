@@ -572,6 +572,121 @@ test_integration_with_create_subvolume() {
     return 0
 }
 
+# Test exclude patterns functionality
+test_exclude_patterns() {
+    test_init "Backup with exclude patterns"
+    
+    # Prepare test data with various file types
+    prepare_test_data 10 50 false false || return 1
+    
+    # Create some specific files to exclude
+    mkdir -p "$SOURCE_MOUNT/logs"
+    for i in {1..10}; do
+        echo "Log entry $i" > "$SOURCE_MOUNT/logs/app_$i.log"
+    done
+    
+    mkdir -p "$SOURCE_MOUNT/temp"
+    for i in {1..5}; do
+        echo "Temporary data $i" > "$SOURCE_MOUNT/temp/temp_$i.tmp"
+    done
+    
+    mkdir -p "$SOURCE_MOUNT/cache"
+    dd if=/dev/urandom of="$SOURCE_MOUNT/cache/cache_data.bin" bs=1K count=100 2>/dev/null
+    
+    # Count files before backup
+    local total_files=$(find "$SOURCE_MOUNT" -type f | wc -l)
+    local log_files=$(find "$SOURCE_MOUNT" -name "*.log" | wc -l)
+    local tmp_files=$(find "$SOURCE_MOUNT" -name "*.tmp" | wc -l)
+    local cache_files=$(find "$SOURCE_MOUNT/cache" -type f | wc -l)
+    
+    logInfo "Total files: $total_files, Log files: $log_files, Tmp files: $tmp_files, Cache files: $cache_files"
+    
+    # Run the backup script with exclude patterns
+    logInfo "Running backup with exclude patterns"
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --exclude='*.log' --exclude='*.tmp' --exclude='cache/'"
+    
+    # Verify backup integrity with exclusions
+    # Count files in destination
+    local dest_total=$(find "$DESTINATION_MOUNT" -type f | wc -l)
+    local dest_log_files=$(find "$DESTINATION_MOUNT" -name "*.log" 2>/dev/null | wc -l)
+    local dest_tmp_files=$(find "$DESTINATION_MOUNT" -name "*.tmp" 2>/dev/null | wc -l)
+    local dest_cache_files=$(find "$DESTINATION_MOUNT/cache" -type f 2>/dev/null | wc -l)
+    
+    logInfo "Destination - Total files: $dest_total, Log files: $dest_log_files, Tmp files: $dest_tmp_files, Cache files: $dest_cache_files"
+    
+    # Verify exclusions worked
+    assertEquals 0 "$dest_log_files" "Log files should be excluded"
+    assertEquals 0 "$dest_tmp_files" "Tmp files should be excluded"
+    assertEquals 0 "$dest_cache_files" "Cache directory should be excluded"
+    
+    # Verify expected file count
+    local expected_files=$((total_files - log_files - tmp_files - cache_files))
+    assertEquals "$expected_files" "$dest_total" "Expected file count after exclusions"
+    
+    test_finish
+}
+
+# Test exclude-from file functionality
+test_exclude_from_file() {
+    test_init "Backup with exclude-from file"
+    
+    # Prepare test data with various file types
+    prepare_test_data 10 50 false false || return 1
+    
+    # Create some specific files to exclude
+    mkdir -p "$SOURCE_MOUNT/node_modules"
+    touch "$SOURCE_MOUNT/node_modules/module1.js"
+    touch "$SOURCE_MOUNT/node_modules/module2.js"
+    
+    mkdir -p "$SOURCE_MOUNT/build"
+    touch "$SOURCE_MOUNT/build/output1.o"
+    touch "$SOURCE_MOUNT/build/output2.o"
+    
+    mkdir -p "$SOURCE_MOUNT/.git"
+    touch "$SOURCE_MOUNT/.git/index"
+    touch "$SOURCE_MOUNT/.git/HEAD"
+    
+    # Create exclude file
+    cat > "$TEST_DIR/exclude_patterns.txt" << EOF
+# This is a comment
+*.o
+node_modules/
+.git/
+EOF
+    
+    # Count files before backup
+    local total_files=$(find "$SOURCE_MOUNT" -type f | wc -l)
+    local o_files=$(find "$SOURCE_MOUNT" -name "*.o" | wc -l)
+    local node_files=$(find "$SOURCE_MOUNT/node_modules" -type f | wc -l)
+    local git_files=$(find "$SOURCE_MOUNT/.git" -type f | wc -l)
+    
+    logInfo "Total files: $total_files, .o files: $o_files, node_modules files: $node_files, .git files: $git_files"
+    
+    # Run the backup script with exclude-from file
+    logInfo "Running backup with exclude-from file"
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --exclude-from=\"$TEST_DIR/exclude_patterns.txt\""
+    
+    # Verify backup integrity with exclusions
+    # Count files in destination
+    local dest_total=$(find "$DESTINATION_MOUNT" -type f | wc -l)
+    local dest_o_files=$(find "$DESTINATION_MOUNT" -name "*.o" 2>/dev/null | wc -l)
+    local dest_node_files=$(find "$DESTINATION_MOUNT/node_modules" -type f 2>/dev/null | wc -l)
+    local dest_git_files=$(find "$DESTINATION_MOUNT/.git" -type f 2>/dev/null | wc -l)
+    
+    logInfo "Destination - Total files: $dest_total, .o files: $dest_o_files, node_modules files: $dest_node_files, .git files: $dest_git_files"
+    
+    # Verify exclusions worked
+    assertEquals 0 "$dest_o_files" ".o files should be excluded"
+    assertEquals 0 "$dest_node_files" "node_modules files should be excluded"
+    assertEquals 0 "$dest_git_files" ".git files should be excluded"
+    
+    # Verify expected file count
+    local expected_files=$((total_files - o_files - node_files - git_files))
+    assertEquals "$expected_files" "$dest_total" "Expected file count after exclusions"
+    
+    test_finish
+}
+
 # Clean up after test
 teardown() {
     # Unmount test filesystems
