@@ -279,8 +279,10 @@ package() {
   cd "\$srcdir/\$pkgname-\$pkgver"
   
   # Install binaries
-  install -Dm755 bin/create-subvolume.sh "\$pkgdir/usr/bin/create-subvolume"
-  install -Dm755 bin/configure-snapshots.sh "\$pkgdir/usr/bin/configure-snapshots"
+    for script in bin/*.sh; do
+        script_name=\$(basename "\$script" .sh)
+        install -Dm755 "\$script" "\$pkgdir/usr/bin/\$script_name"
+    done
   
   # Install man pages
   install -Dm644 man/*.8.gz "\$pkgdir/usr/share/man/man8/"
@@ -329,10 +331,12 @@ override_dh_auto_install:
 	mkdir -p debian/btrfs-subvolume-tools/usr/bin
 	mkdir -p debian/btrfs-subvolume-tools/usr/share/man/man8
 	mkdir -p debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
-	install -m 755 bin/create-subvolume.sh debian/btrfs-subvolume-tools/usr/bin/create-subvolume
-	install -m 755 bin/configure-snapshots.sh debian/btrfs-subvolume-tools/usr/bin/configure-snapshots
-	install -m 644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
-	install -m 644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
+	for script in bin/*.sh; do
+		script_name=\\\$(basename "\\\$script" .sh)
+		install -Dm755 "\\\$script" debian/btrfs-subvolume-tools/usr/bin/"\\\$script_name"
+	done
+	install -Dm644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
+	install -Dm644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
 EOF
     
     # Create Debian changelog
@@ -414,21 +418,17 @@ do_install() {
     fi
 
     # Install scripts
-    if [ -f "bin/create-subvolume.sh" ]; then
-        log_info "Installing create-subvolume script..."
-        install -m 755 bin/create-subvolume.sh "${install_root}/bin/create-subvolume"
-    else
-        log_error "bin/create-subvolume.sh not found"
-        return 1
-    fi
-
-    if [ -f "bin/configure-snapshots.sh" ]; then
-        log_info "Installing configure-snapshots script..."
-        install -m 755 bin/configure-snapshots.sh "${install_root}/bin/configure-snapshots"
-    else
-        log_error "bin/configure-snapshots.sh not found"
-        return 1
-    fi
+    log_info "Installing scripts..."
+    for script in bin/*.sh; do
+        if [ -f "$script" ]; then
+            script_name=$(basename "$script" .sh)
+            log_info "Installing $script_name script..."
+            install -m 755 "$script" "${install_root}/bin/$script_name"
+        else
+            log_error "Script $script not found"
+            return 1
+        fi
+    done
 
     # Install documentation
     log_info "Installing documentation..."
@@ -589,8 +589,10 @@ package() {
     mkdir -p "\$pkgdir/etc/btrfs-subvolume-tools"
     
     # Install binaries
-    install -Dm755 bin/create-subvolume.sh "\$pkgdir/usr/bin/create-subvolume"
-    install -Dm755 bin/configure-snapshots.sh "\$pkgdir/usr/bin/configure-snapshots"
+    for script in bin/*.sh; do
+        script_name=\$(basename "\$script" .sh)
+        install -Dm755 "\$script" "\$pkgdir/usr/bin/\$script_name"
+    done
     
     # Install man pages
     install -Dm644 man/*.8.gz "\$pkgdir/usr/share/man/man8/"
@@ -646,10 +648,12 @@ override_dh_auto_install:
 	mkdir -p debian/btrfs-subvolume-tools/usr/bin
 	mkdir -p debian/btrfs-subvolume-tools/usr/share/man/man8
 	mkdir -p debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
-	install -m 755 bin/create-subvolume.sh debian/btrfs-subvolume-tools/usr/bin/create-subvolume
-	install -m 755 bin/configure-snapshots.sh debian/btrfs-subvolume-tools/usr/bin/configure-snapshots
-	install -m 644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
-	install -m 644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
+	for script in bin/*.sh; do
+		script_name=\\\$(basename "\\\$script" .sh)
+		install -Dm755 "\\\$script" debian/btrfs-subvolume-tools/usr/bin/"\\\$script_name"
+	done
+	install -Dm644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
+	install -Dm644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
 EOF
 
     # Create changelog
