@@ -165,9 +165,19 @@ copy_data() {
     FIND_EXCLUDE_OPTS=""
     if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
         for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-            # Escape the pattern for find
-            escaped_pattern=$(echo "$pattern" | sed 's/[]\/$*.^[]/\\&/g')
-            FIND_EXCLUDE_OPTS+=" -not -path \"*$escaped_pattern*\""
+            # Handle different pattern types differently
+            if [[ "$pattern" == *"/"* ]]; then
+                # Directory pattern (contains slash)
+                dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash if present
+                FIND_EXCLUDE_OPTS+=" -not -path \"*/$dir_pattern/*\" -not -path \"*/$dir_pattern\""
+            elif [[ "$pattern" == \*.* ]]; then
+                # File extension pattern (e.g., *.log)
+                ext="${pattern#\*.}"
+                FIND_EXCLUDE_OPTS+=" -not -name \"*.$ext\""
+            else
+                # Other patterns
+                FIND_EXCLUDE_OPTS+=" -not -name \"$pattern\""
+            fi
         done
     fi
     
