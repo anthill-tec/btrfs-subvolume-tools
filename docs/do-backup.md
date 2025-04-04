@@ -42,6 +42,26 @@ The script automatically selects the most efficient backup method based on avail
 * `-n, --non-interactive`  
   Run without prompting for user input.
 
+* `--exclude=PATTERN`  
+  Exclude files/directories matching PATTERN. This option can be specified multiple times to exclude different patterns.
+
+* `--exclude-from=FILE`  
+  Read exclude patterns from FILE (one pattern per line).
+
+## EXCLUDE PATTERNS
+
+Exclude patterns follow a glob-style syntax similar to `.gitignore`:
+
+* Simple glob patterns like `*.log`, `tmp/`, etc.
+* Patterns with `/` are relative to the source root
+* Patterns without `/` match anywhere in the path
+
+Examples:
+
+* `*.log` - Excludes all files ending with .log
+* `tmp/` - Excludes the tmp directory and its contents
+* `cache/*.tmp` - Excludes .tmp files in the cache directory
+
 ## BACKUP METHODS
 
 The script supports several backup methods, automatically selecting the best available based on installed tools:
@@ -77,23 +97,71 @@ The script handles user interruptions (Ctrl+C) gracefully:
 
 ## EXAMPLES
 
-1. Basic backup:
+* Basic backup:
 
-   ```bash
-   do-backup.sh --source /home/user --destination /mnt/backup/home
-   ```
+  ```bash
+  do-backup.sh --source /home/user --destination /mnt/backup/home
+  ```
 
-2. Using parallel method with continue-on-error:
+* Using parallel backup method:
 
-   ```bash
-   do-backup.sh -s /var -d /mnt/backup/var --method=parallel --error-handling=continue
-   ```
+  ```bash
+  do-backup.sh -s /var -d /mnt/backup/var --method=parallel
+  ```
 
-3. Non-interactive backup:
+* Continue on errors:
 
-   ```bash
-   do-backup.sh -s /home/user -d /mnt/backup/home -n
-   ```
+  ```bash
+  do-backup.sh -s /home/user -d /mnt/backup/home --error-handling=continue
+  ```
+
+* Exclude specific file types:
+
+  ```bash
+  do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='*.tmp'
+  ```
+
+* Exclude multiple directories:
+
+  ```bash
+  do-backup.sh -s /home/user -d /mnt/backup/home --exclude='tmp/' --exclude='cache/' --exclude='.git/'
+  ```
+
+* Exclude specific paths:
+
+  ```bash
+  do-backup.sh -s /home/user -d /mnt/backup/home --exclude='Downloads/large-files/' --exclude='Videos/'
+  ```
+
+* Using an exclude file:
+
+  ```bash
+  # First create an exclude file
+  cat > exclude_patterns.txt << EOF
+  # Comments are supported
+  *.log
+  *.tmp
+  .git/
+  node_modules/
+  target/
+  build/
+  EOF
+
+  # Then use it in the backup command
+  do-backup.sh -s /home/user/projects -d /mnt/backup/projects --exclude-from=exclude_patterns.txt
+  ```
+
+* Combining exclude options:
+
+  ```bash
+  do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.iso' --exclude-from=exclude_patterns.txt
+  ```
+
+* Non-interactive backup with excludes:
+
+  ```bash
+  do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --non-interactive
+  ```
 
 ## NOTES
 
@@ -104,8 +172,8 @@ The script handles user interruptions (Ctrl+C) gracefully:
 
 ## SEE ALSO
 
-* `create-subvolume.sh` - Creates BTRFS subvolumes with optional backup
-* `configure-snapshots.sh` - Configures BTRFS snapshot schedules
+* `create-subvolume` - Creates BTRFS subvolumes with optional backup
+* `configure-snapshots` - Configures BTRFS snapshot schedules
 
 ## AUTHOR
 

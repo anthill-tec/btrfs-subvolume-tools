@@ -17,6 +17,9 @@ ERROR_HANDLING="strict"
 NON_INTERACTIVE=false
 # List to track files that failed to copy
 FAILED_FILES=()
+# Arrays for exclude patterns
+EXCLUDE_PATTERNS=()
+EXCLUDE_FILES=()
 
 # Global variable for process IDs
 CP_PID=""
@@ -41,11 +44,21 @@ show_help() {
   echo "                             strict: Stop on first error (default)"
   echo "                             continue: Skip problem files and continue"
   echo "  -n, --non-interactive      Run without prompting for user input"
+  echo "  --exclude=PATTERN          Exclude files/directories matching PATTERN"
+  echo "                             (can be specified multiple times)"
+  echo "  --exclude-from=FILE        Read exclude patterns from FILE (one pattern per line)"
+  echo
+  echo "Exclude Pattern Format:"
+  echo "  - Simple glob patterns: *.log, tmp/, etc."
+  echo "  - Patterns with / are relative to the source root"
+  echo "  - Patterns without / match anywhere in the path"
   echo
   echo "Example:"
   echo "  $0 --source /home/user --destination /mnt/backup/home"
   echo "  $0 -s /var -d /mnt/backup/var --method=parallel"
   echo "  $0 -s /home/user -d /mnt/backup/home --error-handling=continue"
+  echo "  $0 -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='tmp/'"
+  echo "  $0 -s /home/user -d /mnt/backup/home --exclude-from=exclude_patterns.txt"
   echo
 }
 
@@ -140,6 +153,24 @@ copy_data() {
     # Set up trap for clean cancellation
     trap 'global_cleanup' INT TERM
     
+    # Build exclude options for tar
+    TAR_EXCLUDE_OPTS=""
+    if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+        for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+            TAR_EXCLUDE_OPTS+=" --exclude='$pattern'"
+        done
+    fi
+    
+    # Build find exclude options for parallel and cp methods
+    FIND_EXCLUDE_OPTS=""
+    if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+        for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+            # Escape the pattern for find
+            escaped_pattern=$(echo "$pattern" | sed 's/[]\/$*.^[]/\\&/g')
+            FIND_EXCLUDE_OPTS+=" -not -path \"*$escaped_pattern*\""
+        done
+    fi
+    
     case "$ACTUAL_BACKUP_METHOD" in
         tar)
             # Get source size for progress estimation
@@ -149,9 +180,9 @@ copy_data() {
                 # Use tar with error handling that continues on errors
                 local error_log=$(mktemp)
                 
-                (cd "$source" && tar cf - . 2>"$error_log") | \
-                    pv -s "$SOURCE_SIZE" -name "Copying data" | \
-                    (cd "$destination" && tar xf -)
+                eval "(cd \"$source\" && tar $TAR_EXCLUDE_OPTS cf - . 2>\"$error_log\") | \
+                    pv -s \"$SOURCE_SIZE\" -name \"Copying data\" | \
+                    (cd \"$destination\" && tar xf -)"
                 
                 # Check for errors in the log
                 if [ -s "$error_log" ]; then
@@ -164,12 +195,12 @@ copy_data() {
                 fi
             else
                 # Use tar with strict error handling (default behavior)
-                (cd "$source" && tar cf - .) | \
-                    pv -s "$SOURCE_SIZE" -name "Copying data" | \
-                    (cd "$destination" && tar xf -) || {
-                        echo -e "${RED}Failed to copy data${NC}"
-                        return 1
-                    }
+                eval "(cd \"$source\" && tar $TAR_EXCLUDE_OPTS cf - .) | \
+                    pv -s \"$SOURCE_SIZE\" -name \"Copying data\" | \
+                    (cd \"$destination\" && tar xf -)" || {
+                    echo -e "${RED}Failed to copy data${NC}"
+                    return 1
+                }
             fi
             ;;
         parallel)
@@ -178,12 +209,12 @@ copy_data() {
                 local error_log=$(mktemp)
                 
                 # Copy files with parallel, logging errors
-                find "$source" -type f -print0 | \
+                find "$source" -type f $FIND_EXCLUDE_OPTS -print0 | \
                     parallel --progress --bar --will-cite -0 \
                     "cp --parents {} \"$destination\"/ 2>\"$error_log\" || echo \"Failed to copy: {}\" >> \"$error_log\""
                 
                 # Copy directories (these rarely fail)
-                find "$source" -type d -print0 | \
+                find "$source" -type d $FIND_EXCLUDE_OPTS -print0 | \
                     parallel -0 mkdir -p "$destination/{/.}"
                 
                 # Check for errors in the log
@@ -197,14 +228,14 @@ copy_data() {
                 fi
             else
                 # Use parallel with strict error handling
-                find "$source" -type f -print0 | \
+                find "$source" -type f $FIND_EXCLUDE_OPTS -print0 | \
                     parallel --progress --bar --will-cite -0 cp --parents {} "$destination"/ || {
                         echo -e "${RED}Failed to copy data${NC}"
                         return 1
                     }
                 
                 # Copy directories and special files that parallel might have missed
-                find "$source" -type d -print0 | \
+                find "$source" -type d $FIND_EXCLUDE_OPTS -print0 | \
                     parallel -0 mkdir -p "$destination/{/.}" || {
                         echo -e "${RED}Failed to create directories${NC}"
                         return 1
@@ -216,14 +247,39 @@ copy_data() {
                 # Use cp with error handling that continues on errors
                 local error_log=$(mktemp)
                 
-                # Start cp in background with error logging
-                # Copy all files including hidden ones
-                shopt -s dotglob
-                cp -a --reflink=auto "$source"/* "$destination"/ 2>"$error_log" & 
-                shopt -u dotglob
-                CP_PID=$!
-                progress -mp $CP_PID
-                wait $CP_PID
+                # When using exclude patterns with cp-progress, we need to use find
+                if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+                    echo -e "${YELLOW}Using find with exclude patterns for cp-progress method${NC}"
+                    
+                    # Create destination directories first
+                    eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        rel_dir="${dir#$source}"
+                        if [ -n "$rel_dir" ]; then
+                            mkdir -p "$destination/$rel_dir"
+                        fi
+                    done
+                    
+                    # Copy files with progress
+                    eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > /tmp/files_to_copy.txt
+                    total_files=$(wc -l < /tmp/files_to_copy.txt)
+                    echo -e "${YELLOW}Copying $total_files files...${NC}"
+                    
+                    cat /tmp/files_to_copy.txt | while read -r file; do
+                        rel_file="${file#$source/}"
+                        cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || true
+                    done
+                    
+                    rm /tmp/files_to_copy.txt
+                else
+                    # Start cp in background with error logging (original method)
+                    # Copy all files including hidden ones
+                    shopt -s dotglob
+                    cp -a --reflink=auto "$source"/* "$destination"/ 2>"$error_log" & 
+                    shopt -u dotglob
+                    CP_PID=$!
+                    progress -mp $CP_PID
+                    wait $CP_PID
+                fi
                 
                 # Check for errors in the log
                 if [ -s "$error_log" ]; then
@@ -236,16 +292,48 @@ copy_data() {
                 fi
             else
                 # Use cp with strict error handling
-                # Copy all files including hidden ones
-                shopt -s dotglob
-                cp -a --reflink=auto "$source"/* "$destination"/ & 
-                shopt -u dotglob
-                CP_PID=$!
-                progress -mp $CP_PID
-                wait $CP_PID || { 
-                    echo -e "${RED}Failed to copy data${NC}"
-                    return 1
-                }
+                # When using exclude patterns with cp-progress, we need to use find
+                if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+                    echo -e "${YELLOW}Using find with exclude patterns for cp-progress method${NC}"
+                    
+                    # Create destination directories first
+                    eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        rel_dir="${dir#$source}"
+                        if [ -n "$rel_dir" ]; then
+                            mkdir -p "$destination/$rel_dir" || {
+                                echo -e "${RED}Failed to create directory: $destination/$rel_dir${NC}"
+                                return 1
+                            }
+                        fi
+                    done
+                    
+                    # Copy files with progress
+                    eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > /tmp/files_to_copy.txt
+                    total_files=$(wc -l < /tmp/files_to_copy.txt)
+                    echo -e "${YELLOW}Copying $total_files files...${NC}"
+                    
+                    cat /tmp/files_to_copy.txt | while read -r file; do
+                        rel_file="${file#$source/}"
+                        cp -a --reflink=auto "$file" "$destination/$rel_file" || {
+                            echo -e "${RED}Failed to copy file: $file${NC}"
+                            rm /tmp/files_to_copy.txt
+                            return 1
+                        }
+                    done
+                    
+                    rm /tmp/files_to_copy.txt
+                else
+                    # Copy all files including hidden ones (original method)
+                    shopt -s dotglob
+                    cp -a --reflink=auto "$source"/* "$destination"/ & 
+                    shopt -u dotglob
+                    CP_PID=$!
+                    progress -mp $CP_PID
+                    wait $CP_PID || { 
+                        echo -e "${RED}Failed to copy data${NC}"
+                        return 1
+                    }
+                fi
             fi
             ;;
         cp-plain|*)
@@ -253,10 +341,35 @@ copy_data() {
                 # Use cp with error handling that continues on errors
                 local error_log=$(mktemp)
                 
-                # Copy with error logging - include hidden files
-                shopt -s dotglob
-                cp -a --reflink=auto "$source"/* "$destination"/ 2>"$error_log" || true
-                shopt -u dotglob
+                # When using exclude patterns with cp-plain, we need to use find
+                if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+                    echo -e "${YELLOW}Using find with exclude patterns for cp-plain method${NC}"
+                    
+                    # Create destination directories first
+                    eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        rel_dir="${dir#$source}"
+                        if [ -n "$rel_dir" ]; then
+                            mkdir -p "$destination/$rel_dir"
+                        fi
+                    done
+                    
+                    # Copy files
+                    eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > /tmp/files_to_copy.txt
+                    total_files=$(wc -l < /tmp/files_to_copy.txt)
+                    echo -e "${YELLOW}Copying $total_files files...${NC}"
+                    
+                    cat /tmp/files_to_copy.txt | while read -r file; do
+                        rel_file="${file#$source/}"
+                        cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || true
+                    done
+                    
+                    rm /tmp/files_to_copy.txt
+                else
+                    # Copy with error logging - include hidden files (original method)
+                    shopt -s dotglob
+                    cp -a --reflink=auto "$source"/* "$destination"/ 2>"$error_log" || true
+                    shopt -u dotglob
+                fi
                 
                 # Check for errors in the log
                 if [ -s "$error_log" ]; then
@@ -269,13 +382,45 @@ copy_data() {
                 fi
             else
                 # Use cp with strict error handling
-                # Copy all files including hidden ones
-                shopt -s dotglob
-                cp -a --reflink=auto "$source"/* "$destination"/ || { 
-                    echo -e "${RED}Failed to copy data${NC}"
-                    return 1
-                }
-                shopt -u dotglob
+                # When using exclude patterns with cp-plain, we need to use find
+                if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+                    echo -e "${YELLOW}Using find with exclude patterns for cp-plain method${NC}"
+                    
+                    # Create destination directories first
+                    eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        rel_dir="${dir#$source}"
+                        if [ -n "$rel_dir" ]; then
+                            mkdir -p "$destination/$rel_dir" || {
+                                echo -e "${RED}Failed to create directory: $destination/$rel_dir${NC}"
+                                return 1
+                            }
+                        fi
+                    done
+                    
+                    # Copy files
+                    eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > /tmp/files_to_copy.txt
+                    total_files=$(wc -l < /tmp/files_to_copy.txt)
+                    echo -e "${YELLOW}Copying $total_files files...${NC}"
+                    
+                    cat /tmp/files_to_copy.txt | while read -r file; do
+                        rel_file="${file#$source/}"
+                        cp -a --reflink=auto "$file" "$destination/$rel_file" || {
+                            echo -e "${RED}Failed to copy file: $file${NC}"
+                            rm /tmp/files_to_copy.txt
+                            return 1
+                        }
+                    done
+                    
+                    rm /tmp/files_to_copy.txt
+                else
+                    # Copy all files including hidden ones (original method)
+                    shopt -s dotglob
+                    cp -a --reflink=auto "$source"/* "$destination"/ || { 
+                        echo -e "${RED}Failed to copy data${NC}"
+                        return 1
+                    }
+                    shopt -u dotglob
+                fi
             fi
             ;;
     esac
@@ -313,6 +458,46 @@ copy_data() {
     return 0
 }
 
+# Process exclude files and add patterns to EXCLUDE_PATTERNS
+process_exclude_files() {
+  for exclude_file in "${EXCLUDE_FILES[@]}"; do
+    if [ -f "$exclude_file" ]; then
+      echo -e "${YELLOW}Reading exclude patterns from: $exclude_file${NC}"
+      while IFS= read -r pattern || [ -n "$pattern" ]; do
+        # Skip empty lines and comments
+        if [[ -n "$pattern" && ! "$pattern" =~ ^[[:space:]]*# ]]; then
+          EXCLUDE_PATTERNS+=("$pattern")
+        fi
+      done < "$exclude_file"
+    else
+      echo -e "${RED}Warning: Exclude file not found: $exclude_file${NC}"
+    fi
+  done
+}
+
+# Show exclude patterns to the user
+show_exclude_patterns() {
+  if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+    echo -e "${YELLOW}The following exclude patterns will be applied:${NC}"
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+      echo -e "${YELLOW}  - $pattern${NC}"
+    done
+    
+    if [ "$NON_INTERACTIVE" != true ]; then
+      read -p "Continue with these exclude patterns? (Y/n): " -n 1 -r continue_decision
+      echo
+      
+      # Default to "y" if user just presses Enter
+      continue_decision=${continue_decision:-y}
+      
+      if [[ ! $continue_decision =~ ^[Yy]$ ]]; then
+        echo -e "${RED}Operation cancelled${NC}"
+        exit 1
+      fi
+    fi
+  fi
+}
+
 # Main backup function
 do_backup() {
     # Validate required parameters
@@ -342,6 +527,12 @@ do_backup() {
             exit 1
         }
     fi
+    
+    # Process exclude files
+    process_exclude_files
+    
+    # Show exclude patterns
+    show_exclude_patterns
     
     # Check if source is empty and ask for confirmation
     if [ -z "$(ls -A "$SOURCE_DIR")" ]; then
@@ -428,6 +619,14 @@ parse_arguments() {
                 ;;
             -n|--non-interactive)
                 NON_INTERACTIVE=true
+                shift
+                ;;
+            --exclude=*)
+                EXCLUDE_PATTERNS+=("${1#*=}")
+                shift
+                ;;
+            --exclude-from=*)
+                EXCLUDE_FILES+=("${1#*=}")
                 shift
                 ;;
             *)
