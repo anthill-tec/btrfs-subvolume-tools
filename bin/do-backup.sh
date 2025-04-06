@@ -1091,45 +1091,169 @@ interactive_exclude_selection() {
     pattern_dir_count["$pattern"]=0
   done
   
+  # More thorough analysis of patterns with progress feedback
+  echo -e "${BLUE}Performing thorough analysis of exclude patterns. This may take a moment...${NC}"
+  
   # Count files and directories matched by each pattern
+  local pattern_count=${#EXCLUDE_PATTERNS[@]}
+  local current_pattern=0
+  
   for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+    current_pattern=$((current_pattern + 1))
+    echo -e "${YELLOW}Analyzing pattern ($current_pattern/$pattern_count): $pattern${NC}"
+    
     if [[ "$pattern" == */ ]]; then
       # Directory pattern with trailing slash
-      dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash if present
+      dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
       
-      # Count directories matching this pattern
-      local dirs=$(find "$SOURCE_DIR" \( -path "*/$dir_pattern/*" -o -path "*/$dir_pattern" \) -type d | wc -l)
+      # Count directories matching this pattern - use a more thorough approach
+      echo -e "${YELLOW}  Finding directories matching: $pattern${NC}"
+      
+      # Create a progress indicator function for this search
+      show_progress() {
+        local pid=$1
+        local spin='-\|/'
+        local i=0
+        echo -n "  ${YELLOW}Searching... ${NC}"
+        while kill -0 $pid 2>/dev/null; do
+          i=$(( (i+1) % 4 ))
+          printf "\r  ${YELLOW}Searching... %c ${NC}" "${spin:$i:1}"
+          sleep 0.2
+        done
+        printf "\r  ${GREEN}Search completed!      ${NC}\n"
+      }
+      
+      # Run the find command in background and capture its output
+      local dirs_output_file=$(mktemp)
+      local dirs_cmd="find \"$SOURCE_DIR\" \\( -path \"*/$dir_pattern/*\" -o -path \"*/$dir_pattern\" \\) -type d"
+      eval "$dirs_cmd > \"$dirs_output_file\"" &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Wait for find to complete
+      wait $find_pid
+      
+      # Count the results
+      local dirs=$(wc -l < "$dirs_output_file")
       pattern_dir_count["$pattern"]=$dirs
+      echo -e "${GREEN}  Found $dirs directories matching pattern${NC}"
       
-      # Count total files in these directories
-      local files=0
-      find "$SOURCE_DIR" \( -path "*/$dir_pattern/*" -o -path "*/$dir_pattern" \) -type d | while read -r dir; do
-        if [ -n "$dir" ]; then
-          local dir_files=$(find "$dir" -type f | wc -l)
-          files=$((files + dir_files))
-        fi
-      done
-      pattern_file_count["$pattern"]=$files
+      # Count total files in these directories - ensure this completes
+      if [ $dirs -gt 0 ]; then
+        echo -e "${YELLOW}  Counting files in matched directories...${NC}"
+        local files=0
+        local dir_count=0
+        
+        # Create a progress bar for file counting
+        while read -r dir; do
+          if [ -n "$dir" ]; then
+            dir_count=$((dir_count + 1))
+            printf "\r  ${YELLOW}Processing directory %d/%d ${NC}" $dir_count $dirs
+            
+            # Count files in this directory
+            local dir_files=$(find "$dir" -type f | wc -l)
+            files=$((files + dir_files))
+            
+            # Update the count in real-time for large directories
+            if [ $dir_files -gt 100 ]; then
+              printf "\r  ${YELLOW}Processing directory %d/%d - Found %d files in current dir${NC}\n" $dir_count $dirs $dir_files
+            fi
+          fi
+        done < "$dirs_output_file"
+        
+        # Clear the progress line and show final count
+        printf "\r  ${GREEN}Processed all %d directories                        ${NC}\n" $dirs
+        pattern_file_count["$pattern"]=$files
+        echo -e "${GREEN}  Found $files total files in matched directories${NC}"
+      else
+        pattern_file_count["$pattern"]=0
+      fi
+      
+      # Clean up temp file
+      rm -f "$dirs_output_file"
       
     elif [[ "$pattern" == *"/"* ]]; then
       # Path pattern (contains slash)
-      local files=$(find "$SOURCE_DIR" -path "$pattern" -type f | wc -l)
+      echo -e "${YELLOW}  Finding files matching path pattern: $pattern${NC}"
+      
+      # Create a progress indicator for this search
+      local files_output_file=$(mktemp)
+      local files_cmd="find \"$SOURCE_DIR\" -path \"$pattern\" -type f"
+      
+      # Run find in background
+      eval "$files_cmd > \"$files_output_file\"" &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Count the results
+      local files=$(wc -l < "$files_output_file")
       pattern_file_count["$pattern"]=$files
+      echo -e "${GREEN}  Found $files files matching pattern${NC}"
+      
+      # Clean up temp file
+      rm -f "$files_output_file"
       
     elif [[ "$pattern" == \*.* ]]; then
       # File extension pattern (e.g., *.log)
       ext="${pattern#\*.}"
       
       # Count files matching this pattern
-      local files=$(find "$SOURCE_DIR" -name "*.$ext" -type f | wc -l)
+      echo -e "${YELLOW}  Finding files with extension: .$ext${NC}"
+      
+      # Create a progress indicator for this search
+      local files_output_file=$(mktemp)
+      local files_cmd="find \"$SOURCE_DIR\" -name \"*.$ext\" -type f"
+      
+      # Run find in background
+      eval "$files_cmd > \"$files_output_file\"" &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Count the results
+      local files=$(wc -l < "$files_output_file")
       pattern_file_count["$pattern"]=$files
+      echo -e "${GREEN}  Found $files files matching pattern${NC}"
+      
+      # Clean up temp file
+      rm -f "$files_output_file"
       
     else
       # Other patterns
-      local files=$(find "$SOURCE_DIR" -name "$pattern" -type f | wc -l)
+      echo -e "${YELLOW}  Finding files matching pattern: $pattern${NC}"
+      
+      # Create a progress indicator for this search
+      local files_output_file=$(mktemp)
+      local files_cmd="find \"$SOURCE_DIR\" -name \"$pattern\" -type f"
+      
+      # Run find in background
+      eval "$files_cmd > \"$files_output_file\"" &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Count the results
+      local files=$(wc -l < "$files_output_file")
       pattern_file_count["$pattern"]=$files
+      echo -e "${GREEN}  Found $files files matching pattern${NC}"
+      
+      # Clean up temp file
+      rm -f "$files_output_file"
     fi
+    
+    echo -e "${BLUE}  Pattern analysis complete${NC}"
+    echo
   done
+  
+  # Ensure all find operations have completed
+  echo -e "${BLUE}Analysis complete. Building dialog...${NC}"
+  sleep 1
   
   # Step 2: Show pattern selection dialog
   local dialog_items=""
