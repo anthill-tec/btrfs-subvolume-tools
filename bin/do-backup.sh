@@ -271,6 +271,44 @@ generate_exclude_matches() {
       # Clean up
       rm -f "$output_file"
       
+    elif [[ "$pattern" == *"/**" ]]; then
+      # Pattern ending with /** (e.g., dist/**)
+      # Extract the part before /**
+      dir_name="${pattern%/**}"
+      echo -e "${YELLOW}  Directory wildcard pattern: '$dir_name/**'${NC}"
+      debug_pattern_log "Directory wildcard pattern: '$dir_name/**'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # First find the directory itself at the top level
+      if [ -d "$source_dir/$dir_name" ]; then
+        EXCLUDED_DIRS+=("$source_dir/$dir_name")
+        debug_pattern_log "Excluding top-level directory: $source_dir/$dir_name"
+      fi
+      
+      # Then find any matching directories at deeper levels
+      (find "$source_dir" -type d -path "*/$dir_name" > "$output_file") &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          EXCLUDED_DIRS+=("$item")
+          debug_pattern_log "Excluding directory: $item"
+        fi
+      done < "$output_file"
+      
+      # Store the find command for this pattern - this is the critical part
+      # We need to exclude both the directory itself and all its contents
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name\" -not -path \"*/$dir_name/*\""
+      
+      # Clean up
+      rm -f "$output_file"
+      
     elif [[ "$pattern" == */ ]]; then
       # Directory pattern with trailing slash
       dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
@@ -424,6 +462,43 @@ generate_exclude_matches() {
       # Clean up
       rm -f "$output_file"
       
+    elif [[ "$pattern" == *"/**" ]]; then
+      # Pattern ending with /** (e.g., dist/**)
+      # Extract the part before /**
+      dir_name="${pattern%/**}"
+      echo -e "${YELLOW}  Directory wildcard pattern: '$dir_name/**'${NC}"
+      debug_pattern_log "Directory wildcard pattern: '$dir_name/**'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # First find the directory itself at the top level
+      if [ -d "$source_dir/$dir_name" ]; then
+        EXCLUDED_DIRS+=("$source_dir/$dir_name")
+        debug_pattern_log "Excluding top-level directory: $source_dir/$dir_name"
+      fi
+      
+      # Then find any matching directories at deeper levels
+      (find "$source_dir" -type d -path "*/$dir_name" > "$output_file") &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          EXCLUDED_DIRS+=("$item")
+          debug_pattern_log "Excluding directory: $item"
+        fi
+      done < "$output_file"
+      
+      # Store the find command for this pattern - this is the critical part
+      # We need to exclude both the directory itself and all its contents
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name\" -not -path \"*/$dir_name/*\""
+      
+      # Clean up
+      rm -f "$output_file"
     else
       # Other patterns
       echo -e "${YELLOW}  Other pattern: '$pattern'${NC}"
