@@ -290,14 +290,72 @@ yarn-error.log*
 *.db
 ```
 
-#### Dependencies
+#### Troubleshooting Common Issues
 
-The interactive exclude selection feature requires the `dialog` package to be installed:
+##### Exclude File Not Found
 
-* On Arch Linux: `sudo pacman -S dialog`
-* On Debian/Ubuntu: `sudo apt install dialog`
+If you see "Warning: Exclude file not found" errors:
 
-If `dialog` is not installed, the script will fall back to the non-interactive mode and display a warning message.
+1. **Check file path and permissions**:
+   ```bash
+   ls -la /path/to/your/exclude/file
+   ```
+
+2. **When using sudo**:
+   * The tilde (`~`) in paths refers to root's home directory, not your user's
+   * Use `$HOME` variable or absolute paths instead:
+   ```bash
+   sudo do-backup.sh --exclude-from=$HOME/.backupIgnore
+   # or
+   sudo do-backup.sh --exclude-from=/home/username/.backupIgnore
+   ```
+
+3. **Avoid quotes around paths with tilde**:
+   * Correct: `--exclude-from=~/.backupIgnore`
+   * Incorrect: `--exclude-from='~/.backupIgnore'`
+
+##### Dialog Not Showing
+
+If the interactive exclude selection dialog doesn't appear:
+
+1. **Verify dialog is installed**:
+   ```bash
+   # For Arch Linux
+   pacman -Q dialog
+   ```
+
+2. **Environment issues with sudo**:
+   * When running with sudo, the dialog may fail to display due to environment variables
+   * Try using `sudo -E` to preserve your environment variables:
+   ```bash
+   sudo -E create-subvolume [other options]
+   ```
+   
+3. **Terminal type issues**:
+   * Set the TERM environment variable explicitly:
+   ```bash
+   TERM=xterm sudo create-subvolume [other options]
+   ```
+
+4. **X11 forwarding issues**:
+   * If running over SSH, ensure X11 forwarding is enabled
+   * Try using a text-based dialog alternative by setting:
+   ```bash
+   export DIALOGRC=/path/to/dialogrc
+   ```
+
+##### Pattern Matching Issues
+
+If the script reports "Analysis complete. Found X directories and Y files matching patterns" but then shows "No matches found for pattern":
+
+1. **Check for path relativity issues**:
+   * The script may be using absolute paths internally but comparing with relative paths
+   * Try patterns without leading slashes
+   * For debugging, you can add a simple pattern that you know exists (like a specific filename)
+
+2. **Large number of matches**:
+   * If there are too many matches (thousands of files), the dialog may fail to display
+   * Try with a more specific pattern that matches fewer files
 
 ## BACKUP METHODS
 
