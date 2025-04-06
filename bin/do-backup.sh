@@ -479,14 +479,17 @@ copy_data() {
 # Process exclude files and add patterns to EXCLUDE_PATTERNS
 process_exclude_files() {
   for exclude_file in "${EXCLUDE_FILES[@]}"; do
-    if [ -f "$exclude_file" ]; then
-      echo -e "${YELLOW}Reading exclude patterns from: $exclude_file${NC}"
+    # Expand tilde to home directory if present
+    expanded_file=$(eval echo "$exclude_file")
+    
+    if [ -f "$expanded_file" ]; then
+      echo -e "${YELLOW}Reading exclude patterns from: $expanded_file${NC}"
       while IFS= read -r pattern || [ -n "$pattern" ]; do
         # Skip empty lines and comments
         if [[ -n "$pattern" && ! "$pattern" =~ ^[[:space:]]*# ]]; then
           EXCLUDE_PATTERNS+=("$pattern")
         fi
-      done < "$exclude_file"
+      done < "$expanded_file"
     else
       echo -e "${RED}Warning: Exclude file not found: $exclude_file${NC}"
     fi
