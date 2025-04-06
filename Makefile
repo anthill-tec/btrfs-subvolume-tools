@@ -93,27 +93,27 @@ uninstall:
 
 man:
 	@mkdir -p man
-	@pandoc -s -t man docs/create-subvolume.md -o man/create-subvolume.8
+	@pandoc --from=markdown-smart -s -t man docs/create-subvolume.md -o man/create-subvolume.8
 	@gzip -f man/create-subvolume.8
-	@pandoc -s -t man docs/configure-snapshots.md -o man/configure-snapshots.8
+	@pandoc --from=markdown-smart -s -t man docs/configure-snapshots.md -o man/configure-snapshots.8
 	@gzip -f man/configure-snapshots.8
-	@pandoc -s -t man docs/do-backup.md -o man/do-backup.8
+	@pandoc --from=markdown-smart -s -t man docs/do-backup.md -o man/do-backup.8
 	@gzip -f man/do-backup.8
 
 docs/create-subvolume.8: docs/create-subvolume.md
-	pandoc -s -t man docs/create-subvolume.md -o docs/create-subvolume.8
+	pandoc --from=markdown-smart -s -t man docs/create-subvolume.md -o docs/create-subvolume.8
 
 docs/create-subvolume.8.gz: docs/create-subvolume.8
 	gzip -f docs/create-subvolume.8
 
 docs/configure-snapshots.8: docs/configure-snapshots.md
-	pandoc -s -t man docs/configure-snapshots.md -o docs/configure-snapshots.8
+	pandoc --from=markdown-smart -s -t man docs/configure-snapshots.md -o docs/configure-snapshots.8
 
 docs/configure-snapshots.8.gz: docs/configure-snapshots.8
 	gzip -f docs/configure-snapshots.8
 
 docs/do-backup.8: docs/do-backup.md
-	pandoc -s -t man docs/do-backup.md -o docs/do-backup.8
+	pandoc --from=markdown-smart -s -t man docs/do-backup.md -o docs/do-backup.8
 
 docs/do-backup.8.gz: docs/do-backup.8
 	gzip -f docs/do-backup.8
