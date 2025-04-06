@@ -26,6 +26,7 @@ INTERACTIVE_EXCLUDE_MODE=false
 CP_PID=""
 DEBUG_MODE=false
 DEBUG_LOG=""
+DIALOG_SHOWN=false
 
 # Debug function to log messages when debug mode is enabled
 debug_log() {
@@ -162,10 +163,425 @@ global_cleanup() {
     exit 1
 }
 
+# Generate a list of files and directories that match exclude patterns
+# This function extracts the exclusion pattern logic from copy_data
+# to ensure consistent exclusion logic across the script
+generate_exclude_matches() {
+  local source_dir="$1"
+  
+  # Arrays to store matched files and directories
+  EXCLUDED_FILES=()
+  EXCLUDED_DIRS=()
+  EXCLUDED_PATTERN_MATCHES=()
+  
+  # Process each pattern using the same logic as in copy_data
+  echo -e "${BLUE}Analyzing exclude patterns...${NC}"
+  
+  # Create a progress indicator function for searches
+  show_progress() {
+    local pid=$1
+    local spin='-\|/'
+    local i=0
+    echo -n "  ${YELLOW}Searching... ${NC}"
+    while kill -0 $pid 2>/dev/null; do
+      i=$(( (i+1) % 4 ))
+      printf "\r  ${YELLOW}Searching... %c ${NC}" "${spin:$i:1}"
+      sleep 0.2
+    done
+    printf "\r  ${GREEN}Search completed!      ${NC}\n"
+  }
+  
+  # Process each pattern
+  local pattern_index=0
+  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+    # Trim any whitespace
+    pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+    echo -e "${YELLOW}Processing pattern ($(($pattern_index + 1))/${#EXCLUDE_PATTERNS[@]}): $pattern${NC}"
+    debug_log "Processing exclude pattern: '$pattern'"
+    
+    # Handle different pattern types differently - EXACTLY as in copy_data
+    if [[ "$pattern" == "**/"* ]]; then
+      # Double-asterisk pattern (matches any level of directories)
+      # Extract the part after **/
+      dir_name="${pattern#**/}"
+      # Remove trailing slash if present
+      dir_name="${dir_name%/}"
+      echo -e "${YELLOW}  Double-asterisk pattern: '**/$dir_name'${NC}"
+      debug_pattern_log "Double-asterisk pattern: '**/$dir_name'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # Run the find command in background to show progress
+      (find "$source_dir" \( -path "*/$dir_name" -o -path "*/$dir_name/*" \) > "$output_file") &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          if [ -d "$item" ]; then
+            EXCLUDED_DIRS+=("$item")
+          elif [ -f "$item" ]; then
+            EXCLUDED_FILES+=("$item")
+          fi
+        fi
+      done < "$output_file"
+      
+      # Store the find command for this pattern - will be used to build FIND_EXCLUDE_OPTS
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
+      
+      # Clean up
+      rm -f "$output_file"
+      
+    elif [[ "$pattern" == "**/."* ]]; then
+      # Double-asterisk pattern for hidden directories/files
+      dir_name="${pattern#**/}"
+      # Remove trailing slash if present
+      dir_name="${dir_name%/}"
+      echo -e "${YELLOW}  Double-asterisk hidden pattern: '**/$dir_name'${NC}"
+      debug_pattern_log "Double-asterisk hidden pattern: '**/$dir_name'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # Run the find command in background to show progress
+      (find "$source_dir" \( -path "*/$dir_name" -o -path "*/$dir_name/*" \) > "$output_file") &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          if [ -d "$item" ]; then
+            EXCLUDED_DIRS+=("$item")
+          elif [ -f "$item" ]; then
+            EXCLUDED_FILES+=("$item")
+          fi
+        fi
+      done < "$output_file"
+      
+      # Store the find command for this pattern - will be used to build FIND_EXCLUDE_OPTS
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
+      
+      # Clean up
+      rm -f "$output_file"
+      
+    elif [[ "$pattern" == */ ]]; then
+      # Directory pattern with trailing slash
+      dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
+      echo -e "${YELLOW}  Directory pattern with trailing slash: '$dir_pattern/'${NC}"
+      debug_log "Directory pattern with trailing slash: '$dir_pattern'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # Run the find command in background to show progress
+      (find "$source_dir" \( -path "$source_dir/$dir_pattern/" -o -path "$source_dir/$dir_pattern/*" \) > "$output_file") &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          if [ -d "$item" ]; then
+            EXCLUDED_DIRS+=("$item")
+          elif [ -f "$item" ]; then
+            EXCLUDED_FILES+=("$item")
+          fi
+        fi
+      done < "$output_file"
+      
+      # Store the find command for this pattern - will be used to build FIND_EXCLUDE_OPTS
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"$source_dir/$dir_pattern/\" -not -path \"$source_dir/$dir_pattern/*\""
+      
+      # Clean up
+      rm -f "$output_file"
+      
+    elif [[ "$pattern" == *"/"* ]]; then
+      # Path pattern (contains slash)
+      echo -e "${YELLOW}  Path pattern (contains slash): '$pattern'${NC}"
+      debug_log "Path pattern (contains slash): '$pattern'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # Match exact path - use -path for patterns with directory separators
+      if [[ "$pattern" == */ ]]; then
+        # If pattern ends with slash, it's a directory
+        (find "$source_dir" \( -path "$source_dir/$pattern" -o -path "$source_dir/$pattern*" \) > "$output_file") &
+        local find_pid=$!
+        
+        # Show progress while find is running
+        show_progress $find_pid
+        
+        # Store the find command for this pattern
+        EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"$source_dir/$pattern\" -not -path \"$source_dir/$pattern*\""
+      else
+        # Otherwise it could be a file or directory
+        (find "$source_dir" -path "$source_dir/$pattern" > "$output_file") &
+        local find_pid=$!
+        
+        # Show progress while find is running
+        show_progress $find_pid
+        
+        # Store the find command for this pattern
+        EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"$source_dir/$pattern\""
+      fi
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          if [ -d "$item" ]; then
+            EXCLUDED_DIRS+=("$item")
+          elif [ -f "$item" ]; then
+            EXCLUDED_FILES+=("$item")
+          fi
+        fi
+      done < "$output_file"
+      
+      # Clean up
+      rm -f "$output_file"
+      
+    elif [[ "$pattern" == \*.* ]]; then
+      # File extension pattern (e.g., *.log)
+      ext="${pattern#\*.}"
+      echo -e "${YELLOW}  File extension pattern: '*.$ext'${NC}"
+      debug_log "File extension pattern: '*.$ext'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # Run the find command in background to show progress
+      (find "$source_dir" -name "*.$ext" > "$output_file") &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Process results - these will all be files
+      while read -r item; do
+        if [ -n "$item" ]; then
+          EXCLUDED_FILES+=("$item")
+        fi
+      done < "$output_file"
+      
+      # Store the find command for this pattern
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -name \"*.$ext\""
+      
+      # Clean up
+      rm -f "$output_file"
+      
+    elif [[ "$pattern" == .* ]]; then
+      # Hidden file/directory pattern (starts with .)
+      echo -e "${YELLOW}  Hidden file/directory pattern: '$pattern'${NC}"
+      debug_log "Hidden file/directory pattern: '$pattern'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # Match exact hidden file/directory name
+      if [[ "$pattern" == */ ]]; then
+        # If pattern ends with slash, it's a directory
+        (find "$source_dir" \( -path "*/$pattern" -o -path "*/$pattern*" \) > "$output_file") &
+        local find_pid=$!
+        
+        # Show progress while find is running
+        show_progress $find_pid
+        
+        # Store the find command for this pattern
+        EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$pattern\" -not -path \"*/$pattern*\""
+      else
+        # Otherwise it could be a file or directory
+        # Use -name for file patterns, -path for directory patterns
+        (find "$source_dir" \( -name "$pattern" -o -path "*/$pattern/" -o -path "*/$pattern/*" \) > "$output_file") &
+        local find_pid=$!
+        
+        # Show progress while find is running
+        show_progress $find_pid
+        
+        # Store the find command for this pattern
+        EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -name \"$pattern\" -not -path \"*/$pattern/\" -not -path \"*/$pattern/*\""
+      fi
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          if [ -d "$item" ]; then
+            EXCLUDED_DIRS+=("$item")
+          elif [ -f "$item" ]; then
+            EXCLUDED_FILES+=("$item")
+          fi
+        fi
+      done < "$output_file"
+      
+      # Clean up
+      rm -f "$output_file"
+      
+    else
+      # Other patterns
+      echo -e "${YELLOW}  Other pattern: '$pattern'${NC}"
+      debug_log "Other pattern: '$pattern'"
+      
+      # Create a temporary file to store matched items
+      local output_file=$(mktemp)
+      
+      # Run the find command in background to show progress
+      (find "$source_dir" -name "$pattern" > "$output_file") &
+      local find_pid=$!
+      
+      # Show progress while find is running
+      show_progress $find_pid
+      
+      # Process results
+      while read -r item; do
+        if [ -n "$item" ]; then
+          if [ -d "$item" ]; then
+            EXCLUDED_DIRS+=("$item")
+          elif [ -f "$item" ]; then
+            EXCLUDED_FILES+=("$item")
+          fi
+        fi
+      done < "$output_file"
+      
+      # Store the find command for this pattern
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -name \"$pattern\""
+      
+      # Clean up
+      rm -f "$output_file"
+    fi
+    
+    # Increment pattern index
+    pattern_index=$((pattern_index + 1))
+    echo
+  done
+  
+  # Calculate total matches
+  local total_dir_matches=${#EXCLUDED_DIRS[@]}
+  local total_file_matches=${#EXCLUDED_FILES[@]}
+  
+  echo -e "${BLUE}Analysis complete. Found $total_dir_matches directories and $total_file_matches files matching patterns.${NC}"
+  echo
+  
+  # Build the FIND_EXCLUDE_OPTS string from the pattern matches
+  FIND_EXCLUDE_OPTS=""
+  for pattern_match in "${EXCLUDED_PATTERN_MATCHES[@]}"; do
+    FIND_EXCLUDE_OPTS+=" $pattern_match"
+  done
+  
+  debug_log "Final find exclude options: $FIND_EXCLUDE_OPTS"
+}
+
 # Copy data based on the determined actual backup method
 copy_data() {
     local source="$1"
     local destination="$2"
+    
+    # Ensure source has a trailing slash for rsync
+    source="${source%/}/"
+    
+    # Check if source exists
+    if [ ! -d "$source" ]; then
+        echo -e "${RED}Error: Source directory does not exist: $source${NC}"
+        return 1
+    fi
+    
+    # Set up trap for clean cancellation
+    trap 'global_cleanup' INT TERM
+    
+    # Check if dialog was shown and user has already edited exclusions
+    if [ "$DIALOG_SHOWN" = true ]; then
+        # Dialog was shown, respect user's choices even if arrays are empty
+        echo -e "${BLUE}Using exclusion patterns from dialog selection...${NC}"
+        debug_log "Using exclusion patterns from dialog: ${#EXCLUDED_FILES[@]} files, ${#EXCLUDED_DIRS[@]} directories"
+        
+        # If user removed all exclusions in the dialog, confirm this was intentional
+        if [ ${#EXCLUDED_FILES[@]} -eq 0 ] && [ ${#EXCLUDED_DIRS[@]} -eq 0 ]; then
+            echo -e "${YELLOW}Note: No files or directories will be excluded (as per your dialog selections).${NC}"
+        fi
+    else
+        # Dialog was not shown, generate exclusions if needed
+        if [ ${#EXCLUDED_FILES[@]} -eq 0 ] && [ ${#EXCLUDED_DIRS[@]} -eq 0 ] && [ -z "$FIND_EXCLUDE_OPTS" ]; then
+            # Check if there are any exclusion patterns defined
+            if [ ${#EXCLUDE_PATTERNS[@]} -eq 0 ]; then
+                echo -e "${YELLOW}Warning: No exclusion patterns defined. All files will be included in the backup.${NC}"
+                
+                if [ "$NON_INTERACTIVE" = true ]; then
+                    echo -e "${YELLOW}Non-interactive mode: Continuing with no exclusions${NC}"
+                else
+                    read -p "Continue with no exclusions? This will back up everything (y/N): " -n 1 -r no_exclusions_decision
+                    echo
+                    
+                    # Default to "n" if user just presses Enter
+                    no_exclusions_decision=${no_exclusions_decision:-n}
+                    if [[ ! $no_exclusions_decision =~ ^[Yy]$ ]]; then
+                        echo -e "${RED}Backup cancelled${NC}"
+                        return 1
+                    fi
+                fi
+                echo -e "${YELLOW}Proceeding with no exclusions...${NC}"
+                
+                # Initialize empty arrays and options
+                EXCLUDED_FILES=()
+                EXCLUDED_DIRS=()
+                FIND_EXCLUDE_OPTS=""
+            else
+                # Only generate exclusions if there are patterns and the user wants to continue
+                echo -e "${BLUE}Generating exclusion patterns for backup...${NC}"
+                generate_exclude_matches "$source"
+                
+                # If no exclusions were found despite having patterns, inform the user
+                if [ ${#EXCLUDED_FILES[@]} -eq 0 ] && [ ${#EXCLUDED_DIRS[@]} -eq 0 ]; then
+                    echo -e "${YELLOW}Warning: No files or directories matched your exclusion patterns.${NC}"
+                    
+                    if [ "$NON_INTERACTIVE" = true ]; then
+                        echo -e "${YELLOW}Non-interactive mode: Continuing with no exclusions${NC}"
+                    else
+                        read -p "Continue with no exclusions? This will back up everything (y/N): " -n 1 -r no_exclusions_decision
+                        echo
+                        
+                        # Default to "n" if user just presses Enter
+                        no_exclusions_decision=${no_exclusions_decision:-n}
+                        if [[ ! $no_exclusions_decision =~ ^[Yy]$ ]]; then
+                            echo -e "${RED}Backup cancelled${NC}"
+                            return 1
+                        fi
+                    fi
+                    echo -e "${YELLOW}Proceeding with no exclusions...${NC}"
+                fi
+            fi
+        else
+            # Arrays are already populated from somewhere else
+            echo -e "${BLUE}Using existing exclusion patterns...${NC}"
+            debug_log "Using existing exclusion patterns: ${#EXCLUDED_FILES[@]} files, ${#EXCLUDED_DIRS[@]} directories"
+        fi
+    fi
+    
+    # Debug: Show what files would be excluded by the combined patterns
+    if [ "$DEBUG_MODE" = "true" ]; then
+        debug_pattern_log "Files that would be excluded by the combined patterns:"
+        for file in "${EXCLUDED_FILES[@]}"; do
+            debug_pattern_log "  - $file"
+        done
+        
+        debug_pattern_log "Directories that would be excluded by the combined patterns:"
+        for dir in "${EXCLUDED_DIRS[@]}"; do
+            debug_pattern_log "  - $dir"
+        done
+        
+        # Generic debug check for all files
+        debug_pattern_log "Summary of exclude pattern effects:"
+        debug_pattern_log "  Total files in source: $(find \"$source\" -type f | wc -l)"
+        debug_pattern_log "  Files that will be excluded: ${#EXCLUDED_FILES[@]}"
+        debug_pattern_log "  Directories that will be excluded: ${#EXCLUDED_DIRS[@]}"
+        debug_pattern_log "  Final find exclude options: $FIND_EXCLUDE_OPTS"
+    fi
     
     # Determine the actual method to use based on available tools
     determine_actual_backup_method
@@ -176,147 +592,6 @@ copy_data() {
     # Reset failed files list
     FAILED_FILES=()
     
-    # Set up trap for clean cancellation
-    trap 'global_cleanup' INT TERM
-    
-    # Build exclude options for tar
-    TAR_EXCLUDE_OPTS=""
-    if [ "$INTERACTIVE_EXCLUDE_MODE" != "true" ] && [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
-        for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-            TAR_EXCLUDE_OPTS+=" --exclude='$pattern'"
-        done
-    fi
-    
-    # Build find exclude options for parallel and cp methods
-    FIND_EXCLUDE_OPTS=""
-    if [ "$INTERACTIVE_EXCLUDE_MODE" != "true" ] && [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
-        debug_log "Building find exclude options from ${#EXCLUDE_PATTERNS[@]} patterns"
-        
-        # Debug: List all files before applying any exclude patterns
-        if [ "$DEBUG_MODE" = "true" ]; then
-            debug_pattern_log "Files before applying exclude patterns:"
-            find "$source" -type f | while read -r file; do
-                debug_pattern_log "  - $file"
-            done
-        fi
-        
-        for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-            # Trim any whitespace
-            pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
-            debug_log "Processing exclude pattern: '$pattern'"
-            
-            # Handle different pattern types differently
-            if [[ "$pattern" == "**/"* ]]; then
-                # Double-asterisk pattern (matches any level of directories)
-                # Extract the part after **/
-                dir_name="${pattern#**/}"
-                # Remove trailing slash if present
-                dir_name="${dir_name%/}"
-                debug_pattern_log "Double-asterisk pattern: '**/$dir_name'"
-                
-                # For patterns like **/tmp, we need to match exact directory names
-                # We need to be careful to only match exact directory names, not partial matches
-                # For example, **/log should match /log/ and /path/to/log/ but not /login/ or /path/to/login/
-                
-                # Match the directory exactly by ensuring it's a directory path component
-                # This prevents matching files with similar names
-                # Use -path with proper directory path patterns
-                
-                # Only match exact directory names by adding a trailing slash or making it a path component
-                # This ensures we don't match files with similar names (e.g., important.txt when excluding tmp)
-                FIND_EXCLUDE_OPTS+=" -not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
-                
-                # Debug: Show what files would be excluded by this pattern
-                if [ "$DEBUG_MODE" = "true" ]; then
-                    debug_pattern_log "Files that would be excluded by pattern '$pattern':"
-                    find "$source" -path "*/$dir_name" -o -path "*/$dir_name/*" | while read -r file; do
-                        debug_pattern_log "  - $file"
-                    done
-                fi
-            elif [[ "$pattern" == "**/."* ]]; then
-                # Double-asterisk pattern for hidden directories/files
-                dir_name="${pattern#**/}"
-                # Remove trailing slash if present
-                dir_name="${dir_name%/}"
-                debug_pattern_log "Double-asterisk hidden pattern: '**/$dir_name'"
-                
-                # Similar logic for hidden files/directories
-                # Use -path instead of -name for directory patterns
-                # Only match exact directory names by ensuring proper path components
-                FIND_EXCLUDE_OPTS+=" -not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
-            elif [[ "$pattern" == */ ]]; then
-                # Directory pattern with trailing slash
-                dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
-                debug_log "Directory pattern with trailing slash: '$dir_pattern'"
-                
-                # Match exact directory name with trailing slash to ensure it's a directory
-                FIND_EXCLUDE_OPTS+=" -not -path \"$source/$dir_pattern/\" -not -path \"$source/$dir_pattern/*\""
-            elif [[ "$pattern" == *"/"* ]]; then
-                # Path pattern (contains slash)
-                debug_log "Path pattern (contains slash): '$pattern'"
-                
-                # Match exact path - use -path for patterns with directory separators
-                if [[ "$pattern" == */ ]]; then
-                    # If pattern ends with slash, it's a directory
-                    FIND_EXCLUDE_OPTS+=" -not -path \"$source/$pattern\" -not -path \"$source/$pattern*\""
-                else
-                    # Otherwise it could be a file or directory
-                    FIND_EXCLUDE_OPTS+=" -not -path \"$source/$pattern\""
-                fi
-            elif [[ "$pattern" == \*.* ]]; then
-                # File extension pattern (e.g., *.log)
-                ext="${pattern#\*.}"
-                debug_log "File extension pattern: '*.$ext'"
-                
-                # Match files with exact extension
-                FIND_EXCLUDE_OPTS+=" -not -name \"*.$ext\""
-            elif [[ "$pattern" == .* ]]; then
-                # Hidden file/directory pattern (starts with .)
-                debug_log "Hidden file/directory pattern: '$pattern'"
-                
-                # Match exact hidden file/directory name
-                if [[ "$pattern" == */ ]]; then
-                    # If pattern ends with slash, it's a directory
-                    FIND_EXCLUDE_OPTS+=" -not -path \"*/$pattern\" -not -path \"*/$pattern*\""
-                else
-                    # Otherwise it could be a file or directory
-                    # Use -name for file patterns, -path for directory patterns
-                    FIND_EXCLUDE_OPTS+=" -not -name \"$pattern\" -not -path \"*/$pattern/\" -not -path \"*/$pattern/*\""
-                fi
-            else
-                # Other patterns
-                debug_log "Other pattern: '$pattern'"
-                
-                # Match exact name
-                FIND_EXCLUDE_OPTS+=" -not -name \"$pattern\""
-            fi
-        done
-        debug_log "Final find exclude options: $FIND_EXCLUDE_OPTS"
-    fi
-    
-    # Debug: Show what files would be excluded by the combined patterns
-    if [ "$DEBUG_MODE" = "true" ]; then
-        debug_pattern_log "Files that would be excluded by the combined patterns:"
-        eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | while read -r file; do
-            debug_pattern_log "  - $file"
-        done
-    fi
-    
-    # Final check to ensure important files are not excluded
-    if [ "$DEBUG_MODE" = "true" ]; then
-        debug_pattern_log "Final find exclude options: $FIND_EXCLUDE_OPTS"
-        debug_pattern_log "Files that will be copied after applying all exclude patterns:"
-        eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | while read -r file; do
-            debug_pattern_log "  - $file"
-        done
-        
-        # Generic debug check for all files
-        debug_pattern_log "Summary of exclude pattern effects:"
-        debug_pattern_log "  Total files in source: $(find \"$source\" -type f | wc -l)"
-        debug_pattern_log "  Files that will be copied: $(eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | wc -l)"
-        debug_pattern_log "  Files that will be excluded: $(( $(find \"$source\" -type f | wc -l) - $(eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | wc -l) ))"
-    fi
-    
     case "$ACTUAL_BACKUP_METHOD" in
         tar)
             # Get source size for progress estimation
@@ -326,7 +601,7 @@ copy_data() {
                 # Use tar with error handling that continues on errors
                 local error_log=$(mktemp)
                 
-                eval "(cd \"$source\" && tar $TAR_EXCLUDE_OPTS cf - . 2>\"$error_log\") | \
+                eval "(cd \"$source\" && tar cf - . 2>\"$error_log\") | \
                     pv -s \"$SOURCE_SIZE\" -name \"Copying data\" | \
                     (cd \"$destination\" && tar xf -)"
                 
@@ -341,7 +616,7 @@ copy_data() {
                 fi
             else
                 # Use tar with strict error handling (default behavior)
-                eval "(cd \"$source\" && tar $TAR_EXCLUDE_OPTS cf - .) | \
+                eval "(cd \"$source\" && tar cf - .) | \
                     pv -s \"$SOURCE_SIZE\" -name \"Copying data\" | \
                     (cd \"$destination\" && tar xf -)" || {
                     echo -e "${RED}Failed to copy data${NC}"
@@ -356,15 +631,24 @@ copy_data() {
                 
                 echo -e "${BLUE}Copying files using parallel method...${NC}"
                 debug_log "Starting parallel backup with error handling=continue"
+                debug_log "Source path: $source"
+                
+                # Ensure source path is normalized (remove trailing slash if present)
+                local normalized_source="${source%/}"
+                debug_log "Normalized source path: $normalized_source"
                 
                 # First create the directory structure
                 echo -e "${BLUE}Creating directory structure...${NC}"
                 debug_log "Creating directory structure..."
                 eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
-                    rel_dir="${dir#$source}"
+                    # Extract relative path correctly regardless of trailing slash
+                    rel_dir="${dir#$normalized_source}"
+                    rel_dir="${rel_dir#/}"  # Remove leading slash if present
+                    debug_log "Original dir: $dir"
+                    debug_log "Extracted rel_dir: $rel_dir"
                     if [ -n "$rel_dir" ]; then
-                        debug_log "Creating directory: $destination$rel_dir"
-                        mkdir -p "$destination$rel_dir"
+                        debug_log "Creating directory: $destination/$rel_dir"
+                        mkdir -p "$destination/$rel_dir"
                     fi
                 done
                 
@@ -392,7 +676,11 @@ copy_data() {
                 # First try a simpler approach - process files one by one for better reliability
                 debug_log "Processing files one by one..."
                 while read -r file; do
-                    rel_file="${file#$source/}"
+                    # Extract relative path correctly regardless of trailing slash
+                    rel_file="${file#$normalized_source}"
+                    rel_file="${rel_file#/}"  # Remove leading slash if present
+                    debug_log "Original file: $file"
+                    debug_log "Extracted rel_file: $rel_file"
                     
                     # Create parent directory if it doesn't exist
                     parent_dir="$(dirname "$destination/$rel_file")"
@@ -402,10 +690,7 @@ copy_data() {
                     fi
                     
                     debug_log "Copying $file to $destination/$rel_file"
-                    cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || {
-                        debug_log "Failed to copy: $file to $destination/$rel_file"
-                        FAILED_FILES+=("$file")
-                    }
+                    cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || true
                 done < "$files_list"
                 
                 # Clean up
@@ -435,16 +720,24 @@ copy_data() {
                 fi
             else
                 # Use parallel with strict error handling
+                # Ensure source path is normalized (remove trailing slash if present)
+                local normalized_source="${source%/}"
+                debug_log "Normalized source path: $normalized_source"
+                
                 # First create the directory structure
                 echo -e "${BLUE}Creating directory structure...${NC}"
                 debug_log "Creating directory structure..."
                 eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
-                    rel_dir="${dir#$source}"
+                    # Extract relative path correctly regardless of trailing slash
+                    rel_dir="${dir#$normalized_source}"
+                    rel_dir="${rel_dir#/}"  # Remove leading slash if present
+                    debug_log "Original dir: $dir"
+                    debug_log "Extracted rel_dir: $rel_dir"
                     if [ -n "$rel_dir" ]; then
-                        debug_log "Creating directory: $destination$rel_dir"
-                        mkdir -p "$destination$rel_dir" || {
-                            echo -e "${RED}Failed to create directory: $destination$rel_dir${NC}"
-                            debug_log "Failed to create directory: $destination$rel_dir"
+                        debug_log "Creating directory: $destination/$rel_dir"
+                        mkdir -p "$destination/$rel_dir" || {
+                            echo -e "${RED}Failed to create directory: $destination/$rel_dir${NC}"
+                            debug_log "Failed to create directory: $destination/$rel_dir"
                             return 1
                         }
                     fi
@@ -474,7 +767,11 @@ copy_data() {
                 # Process files one by one for better reliability
                 debug_log "Processing files one by one..."
                 while read -r file; do
-                    rel_file="${file#$source/}"
+                    # Extract relative path correctly regardless of trailing slash
+                    rel_file="${file#$normalized_source}"
+                    rel_file="${rel_file#/}"  # Remove leading slash if present
+                    debug_log "Original file: $file"
+                    debug_log "Extracted rel_file: $rel_file"
                     
                     # Create parent directory if it doesn't exist
                     parent_dir="$(dirname "$destination/$rel_file")"
@@ -754,7 +1051,9 @@ copy_data() {
         echo -e "${YELLOW}The backup was created but may be missing some files${NC}"
         
         # If not in non-interactive mode, ask if user wants to see the list
-        if [ "$NON_INTERACTIVE" != true ] && [ ${#FAILED_FILES[@]} -gt 10 ]; then
+        if [ "$NON_INTERACTIVE" = true ] && [ ${#FAILED_FILES[@]} -gt 10 ]; then
+            echo -e "${YELLOW}Non-interactive mode: Skipping failed files list${NC}"
+        else
             read -p "Do you want to see the complete list of failed files? (y/N): " -n 1 -r show_files
             echo
             
@@ -1068,437 +1367,153 @@ check_dialog() {
 
 # Interactive exclude selection using dialog
 interactive_exclude_selection() {
-  # Check if dialog is installed
-  if ! check_dialog; then
-    return 1
-  fi
-  
-  # Temporary file for dialog output
-  local temp_file=$(mktemp)
-  
-  # Step 1: Collect information about excluded files/directories by pattern
-  echo -e "${BLUE}Analyzing exclude patterns...${NC}"
-  
-  # Arrays to store excluded files by pattern
-  declare -A pattern_file_count
-  declare -A pattern_dir_count
-  declare -A selected_patterns
-  
-  # Initialize all patterns as selected
-  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    selected_patterns["$pattern"]=1
-    pattern_file_count["$pattern"]=0
-    pattern_dir_count["$pattern"]=0
-  done
-  
-  # More thorough analysis of patterns with progress feedback
-  echo -e "${BLUE}Performing thorough analysis of exclude patterns. This may take a moment...${NC}"
-  
-  # Count files and directories matched by each pattern
-  local pattern_count=${#EXCLUDE_PATTERNS[@]}
-  local current_pattern=0
-  
-  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    current_pattern=$((current_pattern + 1))
-    echo -e "${YELLOW}Analyzing pattern ($current_pattern/$pattern_count): $pattern${NC}"
+    local source_dir="$1"
     
-    if [[ "$pattern" == */ ]]; then
-      # Directory pattern with trailing slash
-      dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
-      
-      # Count directories matching this pattern - use a more thorough approach
-      echo -e "${YELLOW}  Finding directories matching: $pattern${NC}"
-      
-      # Create a progress indicator function for this search
-      show_progress() {
-        local pid=$1
-        local spin='-\|/'
-        local i=0
-        echo -n "  ${YELLOW}Searching... ${NC}"
-        while kill -0 $pid 2>/dev/null; do
-          i=$(( (i+1) % 4 ))
-          printf "\r  ${YELLOW}Searching... %c ${NC}" "${spin:$i:1}"
-          sleep 0.2
-        done
-        printf "\r  ${GREEN}Search completed!      ${NC}\n"
-      }
-      
-      # Run the find command in background and capture its output
-      local dirs_output_file=$(mktemp)
-      local dirs_cmd="find \"$SOURCE_DIR\" \\( -path \"*/$dir_pattern/*\" -o -path \"*/$dir_pattern\" \\) -type d"
-      eval "$dirs_cmd > \"$dirs_output_file\"" &
-      local find_pid=$!
-      
-      # Show progress while find is running
-      show_progress $find_pid
-      
-      # Wait for find to complete
-      wait $find_pid
-      
-      # Count the results
-      local dirs=$(wc -l < "$dirs_output_file")
-      pattern_dir_count["$pattern"]=$dirs
-      echo -e "${GREEN}  Found $dirs directories matching pattern${NC}"
-      
-      # Count total files in these directories - ensure this completes
-      if [ $dirs -gt 0 ]; then
-        echo -e "${YELLOW}  Counting files in matched directories...${NC}"
-        local files=0
-        local dir_count=0
+    # Create temporary directory for dialog files
+    local temp_dir=$(mktemp -d)
+    local temp_file="$temp_dir/dialog_output"
+    
+    # Check if dialog is installed
+    if ! command -v dialog >/dev/null 2>&1; then
+        echo -e "${RED}Error: dialog command not found. Please install dialog package.${NC}"
+        return 1
+    fi
+    
+    # Generate exclude matches using the shared function
+    generate_exclude_matches "$source_dir"
+    
+    # Process each pattern
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+        # Trim any whitespace
+        pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
         
-        # Create a progress bar for file counting
-        while read -r dir; do
-          if [ -n "$dir" ]; then
-            dir_count=$((dir_count + 1))
-            printf "\r  ${YELLOW}Processing directory %d/%d ${NC}" $dir_count $dirs
-            
-            # Count files in this directory
-            local dir_files=$(find "$dir" -type f | wc -l)
-            files=$((files + dir_files))
-            
-            # Update the count in real-time for large directories
-            if [ $dir_files -gt 100 ]; then
-              printf "\r  ${YELLOW}Processing directory %d/%d - Found %d files in current dir${NC}\n" $dir_count $dirs $dir_files
+        # Skip empty patterns
+        if [ -z "$pattern" ]; then
+            continue
+        fi
+        
+        echo -e "${BLUE}Showing matches for pattern: $pattern${NC}"
+        
+        # Filter the excluded files and directories for this pattern
+        local pattern_files=()
+        local pattern_dirs=()
+        
+        # For each excluded file, check if it matches the current pattern
+        for file in "${EXCLUDED_FILES[@]}"; do
+            # Check if the file matches this pattern
+            if [[ "$file" == *"$pattern"* ]] || [[ "$file" =~ $pattern ]]; then
+                pattern_files+=("$file")
             fi
-          fi
-        done < "$dirs_output_file"
+        done
         
-        # Clear the progress line and show final count
-        printf "\r  ${GREEN}Processed all %d directories                        ${NC}\n" $dirs
-        pattern_file_count["$pattern"]=$files
-        echo -e "${GREEN}  Found $files total files in matched directories${NC}"
-      else
-        pattern_file_count["$pattern"]=0
-      fi
-      
-      # Clean up temp file
-      rm -f "$dirs_output_file"
-      
-    elif [[ "$pattern" == *"/"* ]]; then
-      # Path pattern (contains slash)
-      echo -e "${YELLOW}  Finding files matching path pattern: $pattern${NC}"
-      
-      # Create a progress indicator for this search
-      local files_output_file=$(mktemp)
-      local files_cmd="find \"$SOURCE_DIR\" -path \"$pattern\" -type f"
-      
-      # Run find in background
-      eval "$files_cmd > \"$files_output_file\"" &
-      local find_pid=$!
-      
-      # Show progress while find is running
-      show_progress $find_pid
-      
-      # Count the results
-      local files=$(wc -l < "$files_output_file")
-      pattern_file_count["$pattern"]=$files
-      echo -e "${GREEN}  Found $files files matching pattern${NC}"
-      
-      # Clean up temp file
-      rm -f "$files_output_file"
-      
-    elif [[ "$pattern" == \*.* ]]; then
-      # File extension pattern (e.g., *.log)
-      ext="${pattern#\*.}"
-      
-      # Count files matching this pattern
-      echo -e "${YELLOW}  Finding files with extension: .$ext${NC}"
-      
-      # Create a progress indicator for this search
-      local files_output_file=$(mktemp)
-      local files_cmd="find \"$SOURCE_DIR\" -name \"*.$ext\" -type f"
-      
-      # Run find in background
-      eval "$files_cmd > \"$files_output_file\"" &
-      local find_pid=$!
-      
-      # Show progress while find is running
-      show_progress $find_pid
-      
-      # Count the results
-      local files=$(wc -l < "$files_output_file")
-      pattern_file_count["$pattern"]=$files
-      echo -e "${GREEN}  Found $files files matching pattern${NC}"
-      
-      # Clean up temp file
-      rm -f "$files_output_file"
-      
-    else
-      # Other patterns
-      echo -e "${YELLOW}  Finding files matching pattern: $pattern${NC}"
-      
-      # Create a progress indicator for this search
-      local files_output_file=$(mktemp)
-      local files_cmd="find \"$SOURCE_DIR\" -name \"$pattern\" -type f"
-      
-      # Run find in background
-      eval "$files_cmd > \"$files_output_file\"" &
-      local find_pid=$!
-      
-      # Show progress while find is running
-      show_progress $find_pid
-      
-      # Count the results
-      local files=$(wc -l < "$files_output_file")
-      pattern_file_count["$pattern"]=$files
-      echo -e "${GREEN}  Found $files files matching pattern${NC}"
-      
-      # Clean up temp file
-      rm -f "$files_output_file"
-    fi
+        # For each excluded directory, check if it matches the current pattern
+        for dir in "${EXCLUDED_DIRS[@]}"; do
+            # Check if the directory matches this pattern
+            if [[ "$dir" == *"$pattern"* ]] || [[ "$dir" =~ $pattern ]]; then
+                pattern_dirs+=("$dir")
+            fi
+        done
+        
+        # Combine files and directories
+        local all_items=("${pattern_files[@]}" "${pattern_dirs[@]}")
+        
+        # If no matches found, continue to next pattern
+        if [ ${#all_items[@]} -eq 0 ]; then
+            echo -e "${YELLOW}No matches found for pattern: $pattern${NC}"
+            continue
+        fi
+        
+        # Build dialog items
+        local dialog_items=""
+        local i=1
+        
+        for item in "${all_items[@]}"; do
+            # Get relative path
+            local rel_path="${item#$source_dir/}"
+            
+            # Check if it's a directory or file
+            if [ -d "$item" ]; then
+                dialog_items+="\"$i\" \"$rel_path/ (dir)\" on "
+            else
+                dialog_items+="\"$i\" \"$rel_path\" on "
+            fi
+            
+            i=$((i + 1))
+        done
+        
+        # Show the checklist for files/directories
+        eval "dialog --title \"Files/Directories for Pattern: $pattern\" --backtitle \"BTRFS Backup Utility\" \
+            --checklist \"Select items to exclude (Space to toggle, Enter to confirm):\" 20 70 15 \
+            $dialog_items 2> $temp_file"
+        
+        # Get the selected items
+        if [ -s "$temp_file" ]; then
+            local selected_indices=$(cat "$temp_file")
+            
+            # Process selected indices
+            if [ -n "$selected_indices" ]; then
+                # Convert the selected indices to an array
+                local selected_array=()
+                for index in $selected_indices; do
+                    # Remove quotes if present
+                    index=${index//\"/}
+                    selected_array+=($index)
+                done
+                
+                # Create a new array for items to keep
+                local keep_items=()
+                
+                # Loop through all items and keep only those not selected
+                for ((j=1; j<=${#all_items[@]}; j++)); do
+                    # Check if this index is in the selected array
+                    if ! [[ " ${selected_array[@]} " =~ " $j " ]]; then
+                        # This item was not selected, so keep it
+                        keep_items+=("${all_items[$j-1]}")
+                    fi
+                done
+                
+                # Replace the original arrays with the filtered ones
+                local new_excluded_files=()
+                local new_excluded_dirs=()
+                
+                # Add all excluded files that were not in the current pattern
+                for file in "${EXCLUDED_FILES[@]}"; do
+                    if ! [[ " ${all_items[@]} " =~ " $file " ]] || [[ " ${keep_items[@]} " =~ " $file " ]]; then
+                        new_excluded_files+=("$file")
+                    fi
+                done
+                
+                # Add all excluded directories that were not in the current pattern
+                for dir in "${EXCLUDED_DIRS[@]}"; do
+                    if ! [[ " ${all_items[@]} " =~ " $dir " ]] || [[ " ${keep_items[@]} " =~ " $dir " ]]; then
+                        new_excluded_dirs+=("$dir")
+                    fi
+                done
+                
+                # Update the arrays
+                EXCLUDED_FILES=("${new_excluded_files[@]}")
+                EXCLUDED_DIRS=("${new_excluded_dirs[@]}")
+                
+                # Rebuild FIND_EXCLUDE_OPTS based on the updated exclusion lists
+                FIND_EXCLUDE_OPTS=""
+                for file in "${EXCLUDED_FILES[@]}"; do
+                    FIND_EXCLUDE_OPTS+=" -not -path \"$file\""
+                done
+                
+                for dir in "${EXCLUDED_DIRS[@]}"; do
+                    FIND_EXCLUDE_OPTS+=" -not -path \"$dir\" -not -path \"$dir/*\""
+                done
+            fi
+        fi
+    done
     
-    echo -e "${BLUE}  Pattern analysis complete${NC}"
-    echo
-  done
-  
-  # Ensure all find operations have completed
-  echo -e "${BLUE}Analysis complete. Building dialog...${NC}"
-  sleep 1
-  
-  # Step 2: Show pattern selection dialog
-  local dialog_items=""
-  local item_count=0
-  
-  # Build dialog items for patterns
-  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    item_count=$((item_count + 1))
-    local file_count=${pattern_file_count["$pattern"]}
-    local dir_count=${pattern_dir_count["$pattern"]}
+    # Set flag to indicate dialog was shown and user has edited exclusions
+    DIALOG_SHOWN=true
     
-    # Add pattern to dialog items with counts
-    if [ $dir_count -gt 0 ]; then
-      dialog_items+="\"p$item_count\" \"$pattern ($dir_count dirs, $file_count files)\" ${selected_patterns["$pattern"]} "
-    elif [ $file_count -gt 0 ]; then
-      dialog_items+="\"p$item_count\" \"$pattern ($file_count files)\" ${selected_patterns["$pattern"]} "
-    else
-      dialog_items+="\"p$item_count\" \"$pattern (no matches)\" ${selected_patterns["$pattern"]} "
-    fi
-  done
-  
-  # If no patterns have matches, show a message and return
-  local total_matches=0
-  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    total_matches=$((total_matches + ${pattern_file_count["$pattern"]} + ${pattern_dir_count["$pattern"]}))
-  done
-  
-  if [ $total_matches -eq 0 ]; then
-    dialog --title "Exclude Patterns" --backtitle "BTRFS Backup Utility" \
-      --msgbox "No files or directories match the specified exclude patterns.\n\nAll files will be included in the backup." 10 60
-    rm -f "$temp_file"
+    # Clean up
+    rm -rf "$temp_dir"
+    
     return 0
-  fi
-  
-  # Run dialog checklist for patterns
-  eval "dialog --title \"Exclude Patterns\" --backtitle \"BTRFS Backup Utility\" \
-    --checklist \"Select patterns to exclude (Space to toggle, Enter to confirm):\" 20 70 10 \
-    $dialog_items 2> $temp_file"
-  
-  # Check dialog exit status
-  if [ $? -ne 0 ]; then
-    echo -e "${YELLOW}Exclude selection cancelled.${NC}"
-    rm -f "$temp_file"
-    return 1
-  fi
-  
-  # Read selected patterns
-  local selected_pattern_ids=$(cat "$temp_file")
-  
-  # Update pattern selection based on user choices
-  for i in $(seq 1 $item_count); do
-    local pattern_idx=$((i - 1))
-    local pattern="${EXCLUDE_PATTERNS[$pattern_idx]}"
-    
-    if echo "$selected_pattern_ids" | grep -q "p$i"; then
-      selected_patterns["$pattern"]=1
-    else
-      selected_patterns["$pattern"]=0
-    fi
-  done
-  
-  # Filter EXCLUDE_PATTERNS based on user selections
-  local filtered_patterns=()
-  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    if [ ${selected_patterns["$pattern"]} -eq 1 ]; then
-      filtered_patterns+=("$pattern")
-    fi
-  done
-  
-  EXCLUDE_PATTERNS=("${filtered_patterns[@]}")
-  
-  # Step 3: For each selected pattern, show file/directory selection dialog
-  declare -A excluded_files
-  declare -A excluded_dirs
-  
-  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    # Skip patterns with no matches
-    if [ ${pattern_file_count["$pattern"]} -eq 0 ] && [ ${pattern_dir_count["$pattern"]} -eq 0 ]; then
-      continue
-    fi
-    
-    # Arrays to store matched files and directories
-    local matched_files=()
-    local matched_dirs=()
-    
-    # Find files and directories matched by this pattern
-    if [[ "$pattern" == *"/"* ]]; then
-      # Directory pattern (contains slash)
-      dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash if present
-      
-      # Find directories matching this pattern
-      while read -r dir; do
-        if [ -n "$dir" ]; then
-          local file_count=$(find "$dir" -type f | wc -l)
-          matched_dirs+=("$dir ($file_count files)")
-          excluded_dirs["$dir"]=1
-        fi
-      done < <(find "$SOURCE_DIR" \( -path "*/$dir_pattern/*" -o -path "*/$dir_pattern" \) -type d | sort)
-      
-    elif [[ "$pattern" == \*.* ]]; then
-      # File extension pattern (e.g., *.log)
-      ext="${pattern#\*.}"
-      
-      # Find files matching this pattern
-      while read -r file; do
-        if [ -n "$file" ]; then
-          matched_files+=("$file")
-          excluded_files["$file"]=1
-        fi
-      done < <(find "$SOURCE_DIR" -name "*.$ext" -type f | sort)
-      
-    else
-      # Other patterns
-      while read -r file; do
-        if [ -n "$file" ]; then
-          matched_files+=("$file")
-          excluded_files["$file"]=1
-        fi
-      done < <(find "$SOURCE_DIR" -name "$pattern" -type f | sort)
-    fi
-    
-    # Build dialog items for files and directories
-    local dialog_items=""
-    local item_count=0
-    
-    # Add directories to the list
-    for dir_entry in "${matched_dirs[@]}"; do
-      item_count=$((item_count + 1))
-      local dir="${dir_entry%% (*}"
-      dialog_items+="\"d$item_count\" \"$dir_entry\" 1 "
-    done
-    
-    # Add files to the list (limit to 100 files for performance)
-    local file_count=0
-    for file in "${matched_files[@]}"; do
-      file_count=$((file_count + 1))
-      if [ $file_count -le 100 ]; then
-        item_count=$((item_count + 1))
-        dialog_items+="\"f$item_count\" \"$file\" 1 "
-      fi
-    done
-    
-    # If there are more than 100 files, add a note
-    if [ $file_count -gt 100 ]; then
-      dialog_items+="\"more\" \"... and $(($file_count - 100)) more files (not shown)\" 0 "
-    fi
-    
-    # Skip if no items to show
-    if [ -z "$dialog_items" ]; then
-      continue
-    fi
-    
-    # Show the checklist for files/directories
-    eval "dialog --title \"Files/Directories for Pattern: $pattern\" --backtitle \"BTRFS Backup Utility\" \
-      --checklist \"Select items to exclude (Space to toggle, Enter to confirm):\" 20 70 15 \
-      $dialog_items 2> $temp_file"
-    
-    # Check dialog exit status
-    if [ $? -ne 0 ]; then
-      # User cancelled, keep all files/dirs for this pattern
-      continue
-    fi
-    
-    # Read selected items
-    local selected_items=$(cat "$temp_file")
-    
-    # Update file/directory status based on selection
-    for i in $(seq 1 $item_count); do
-      if echo "$dialog_items" | grep -q "\"d$i\""; then
-        # This is a directory
-        local dir_entry=$(echo "$dialog_items" | grep -o "\"d$i\" \"[^\"]*\"" | cut -d'"' -f4)
-        local dir="${dir_entry%% (*}"
-        
-        if echo "$selected_items" | grep -q "d$i"; then
-          # Directory was selected for exclusion
-          excluded_dirs["$dir"]=1
-        else
-          # Directory was deselected
-          excluded_dirs["$dir"]=0
-        fi
-      elif echo "$dialog_items" | grep -q "\"f$i\""; then
-        # This is a file
-        local file=$(echo "$dialog_items" | grep -o "\"f$i\" \"[^\"]*\"" | cut -d'"' -f4)
-        
-        if echo "$selected_items" | grep -q "f$i"; then
-          # File was selected for exclusion
-          excluded_files["$file"]=1
-        else
-          # File was deselected
-          excluded_files["$file"]=0
-        fi
-      fi
-    done
-  done
-  
-  # Step 4: Build custom find and tar exclude options based on selections
-  FIND_EXCLUDE_OPTS=""
-  TAR_EXCLUDE_OPTS=""
-  
-  # Add selected directories to exclude options
-  for dir in "${!excluded_dirs[@]}"; do
-    if [ ${excluded_dirs["$dir"]} -eq 1 ]; then
-      rel_dir="${dir#$SOURCE_DIR/}"
-      FIND_EXCLUDE_OPTS+=" -not -wholename \"$dir/*\" -not -wholename \"$dir\""
-      TAR_EXCLUDE_OPTS+=" --exclude='$rel_dir'"
-    fi
-  done
-  
-  # Add selected files to exclude options
-  for file in "${!excluded_files[@]}"; do
-    if [ ${excluded_files["$file"]} -eq 1 ]; then
-      rel_file="${file#$SOURCE_DIR/}"
-      FIND_EXCLUDE_OPTS+=" -not -wholename \"$file\""
-      TAR_EXCLUDE_OPTS+=" --exclude='$rel_file'"
-    fi
-  done
-  
-  # Show summary of what will be excluded
-  local total_excluded_dirs=0
-  local total_excluded_files=0
-  
-  for dir in "${!excluded_dirs[@]}"; do
-    if [ ${excluded_dirs["$dir"]} -eq 1 ]; then
-      total_excluded_dirs=$((total_excluded_dirs + 1))
-    fi
-  done
-  
-  for file in "${!excluded_files[@]}"; do
-    if [ ${excluded_files["$file"]} -eq 1 ]; then
-      total_excluded_files=$((total_excluded_files + 1))
-    fi
-  done
-  
-  dialog --title "Exclude Summary" --backtitle "BTRFS Backup Utility" \
-    --msgbox "The backup will exclude:\n\n- $total_excluded_dirs directories\n- $total_excluded_files files\n\nSelected patterns will be applied to the backup process." 10 60
-  
-  # Clean up
-  rm -f "$temp_file"
-  
-  # Override the default exclude pattern processing
-  # This ensures the interactive selections take precedence
-  # over the default pattern-based exclusions in copy_data
-  INTERACTIVE_EXCLUDE_MODE=true
-  
-  return 0
 }
 
 # Main backup function
@@ -1534,16 +1549,21 @@ do_backup() {
     # Process exclude files
     process_exclude_files
     
+    # Create a new subvolume if needed
+    if [ "$CREATE_SUBVOLUME" = true ]; then
+        create_subvolume
+    fi
+    
     # Show interactive exclude selection if requested
     if [ "$SHOW_EXCLUDED" = true ]; then
-      interactive_exclude_selection
-      # If user cancelled, exit
-      if [ $? -ne 0 ]; then
-        echo -e "${YELLOW}Backup cancelled.${NC}"
-        exit 0
-      fi
+        interactive_exclude_selection "$SOURCE_DIR"
+        # If user cancelled, exit
+        if [ $? -ne 0 ]; then
+            echo -e "${YELLOW}Backup cancelled.${NC}"
+            exit 0
+        fi
     else
-      show_exclude_patterns
+        show_exclude_patterns
     fi
     
     # Check if source is empty and ask for confirmation
@@ -1659,6 +1679,15 @@ parse_arguments() {
                 ;;
         esac
     done
+    
+    # Validate incompatible options with non-interactive mode
+    if [ "$NON_INTERACTIVE" = true ]; then
+        if [ "$SHOW_EXCLUDED" = true ]; then
+            echo -e "${RED}Error: --show-excluded cannot be used with --non-interactive mode${NC}"
+            echo -e "${YELLOW}In non-interactive mode, exclusion patterns must be specified via --exclude or --exclude-from${NC}"
+            exit 1
+        fi
+    fi
 }
 
 # Script execution starts here
