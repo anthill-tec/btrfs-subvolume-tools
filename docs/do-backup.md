@@ -51,6 +51,9 @@ The script automatically selects the most efficient backup method based on avail
 * `--exclude-from=FILE`  
   Read exclude patterns from FILE (one pattern per line).
 
+* `--show-excluded`  
+  Interactively review and select which files and directories to exclude. This feature requires the `dialog` package to be installed. Note that this option is incompatible with `--non-interactive` mode and will cause the script to exit with an error if both are specified.
+
 ## EXCLUDE PATTERNS
 
 The `do-backup.sh` script supports excluding files and directories from the backup using glob-style patterns. This is useful for skipping temporary files, logs, caches, or other files that don't need to be backed up.
@@ -69,6 +72,8 @@ There are two ways to specify exclude patterns:
 ### Interactive Exclude Selection
 
 You can use the `--show-excluded` option to interactively review and select which files and directories to exclude. This feature requires the `dialog` package to be installed.
+
+**Important**: The `--show-excluded` option is incompatible with `--non-interactive` mode. If both options are specified, the script will display an error message and exit with a failure status.
 
 When using this option, the script provides a two-level selection interface:
 
