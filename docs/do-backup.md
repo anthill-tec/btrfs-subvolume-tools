@@ -65,9 +65,41 @@ There are two ways to specify exclude patterns:
 
 ### Pattern Format
 
-* Simple glob patterns: `*.log`, `tmp/`, etc.
-* Patterns with `/` are relative to the source root
-* Patterns without `/` match anywhere in the path
+The script supports several types of exclusion patterns:
+
+* **Double-asterisk patterns** (`**/pattern` or `pattern/**`):
+  * `**/pattern` matches files/directories with the name "pattern" at any level in the directory tree
+  * `pattern/**` matches all files and directories under a directory named "pattern"
+  * Example: `dist/**` excludes the entire `dist` directory and all its contents
+
+* **Hidden file/directory patterns** (`.pattern`):
+  * Matches hidden files or directories starting with a dot
+  * Example: `.git` excludes all files/directories named ".git"
+
+* **Directory patterns with trailing slashes** (`dir/`):
+  * Specifically matches directories (not files) with the given name
+  * Example: `cache/` excludes directories named "cache" but not files named "cache"
+
+* **Path patterns with slashes** (`dir/file`):
+  * Patterns containing slashes are matched against the full path relative to the source directory
+  * Example: `logs/debug.log` only excludes "debug.log" in the "logs" directory
+
+* **File extension patterns** (`*.ext`):
+  * Matches files with the specified extension
+  * Example: `*.tmp` excludes all files with the ".tmp" extension
+
+* **Regular patterns** (anything else):
+  * Matches files or directories by name anywhere in the directory tree
+  * Example: `node_modules` excludes all files and directories named "node_modules"
+
+### Pattern Behavior
+
+* Patterns without slashes match anywhere in the path
+* Patterns with slashes are matched against the path relative to the source root
+* Comments in exclude files start with `#` and are ignored
+* Empty lines in exclude files are ignored
+* When a directory is excluded, all its contents are also excluded
+* Patterns are case-sensitive on Unix/Linux systems
 
 ### Interactive Exclude Selection
 
@@ -155,7 +187,7 @@ This hierarchical approach gives you fine-grained control over what gets exclude
 ### Examples
 
 ```bash
-# Exclude all log files and the tmp directory
+# Basic exclusion examples
 do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='tmp/'
 
 # Read exclude patterns from a file
@@ -170,6 +202,92 @@ do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='tmp/
 # cache/
 # node_modules/
 # .git/
+```
+
+#### More Comprehensive Examples
+
+```bash
+# Exclude specific directories and their contents
+do-backup.sh -s /home/user/project -d /mnt/backup/project --exclude='node_modules/**' --exclude='dist/**'
+
+# Exclude hidden directories (common in development projects)
+do-backup.sh -s /home/user/project -d /mnt/backup/project --exclude='.git' --exclude='.vscode' --exclude='.idea'
+
+# Exclude temporary and build artifacts
+do-backup.sh -s /home/user/project -d /mnt/backup/project --exclude='*.o' --exclude='*.a' --exclude='*.so' --exclude='*.pyc'
+
+# Exclude log directories at any level in the directory tree
+do-backup.sh -s /home/user/project -d /mnt/backup/project --exclude='**/logs' --exclude='**/log'
+
+# Exclude specific files in specific directories
+do-backup.sh -s /home/user/project -d /mnt/backup/project --exclude='config/secrets.json' --exclude='data/large_dataset.csv'
+
+# Combine multiple pattern types
+do-backup.sh -s /home/user/project -d /mnt/backup/project \
+  --exclude='*.log' \
+  --exclude='tmp/' \
+  --exclude='node_modules/**' \
+  --exclude='.git' \
+  --exclude='build/temp/**' \
+  --exclude='**/cache'
+```
+
+#### Example exclude_patterns.txt for a Development Project
+
+```
+# Temporary files
+*.tmp
+*.temp
+*.swp
+*~
+
+# Build artifacts
+*.o
+*.a
+*.so
+*.pyc
+*.class
+*.jar
+*.war
+__pycache__/
+*.egg-info/
+
+# Build directories
+build/
+dist/
+target/
+out/
+
+# Development environment
+.git/
+.svn/
+.hg/
+.idea/
+.vscode/
+.settings/
+.project
+.classpath
+
+# Dependencies
+node_modules/
+vendor/
+bower_components/
+jspm_packages/
+
+# Logs and caches
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.npm/
+.yarn/
+.cache/
+
+# Large data files
+*.csv
+*.sqlite
+*.db
 ```
 
 #### Dependencies
