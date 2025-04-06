@@ -58,10 +58,6 @@ This tool is particularly useful when setting up a new subvolume layout on an ex
 - `strict`: Stop on first error (default)
 - `continue`: Skip problem files and continue
 
-**--backup-extra-opts="OPTS"**
-: Additional options to pass to the backup command
-  (Use with caution, options are passed directly to do-backup.sh)
-
 **--debug**
 : Enable debug mode with detailed logging. This option provides verbose output about the backup process, including pattern matching details, file operations, and execution flow. Useful for troubleshooting exclude pattern issues or diagnosing backup failures.
 
