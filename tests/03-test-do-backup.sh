@@ -11,7 +11,7 @@ DESTINATION_DEVICE=""
 SCRIPT_PATH=""
 
 # Debug mode flag - can be set from the environment
-DEBUG_MODE="${DEBUG_MODE:-false}"
+DEBUG_MODE="${DEBUG:-false}"
 
 # Setup test environment 
 setup() {
@@ -421,9 +421,15 @@ test_parallel_backup() {
     # Prepare test data (medium-sized files and large files)
     prepare_test_data 10 50 false true || return 1
     
+    # Determine debug flag
+    local debug_flag=""
+    if [ "${DEBUG:-false}" = "true" ]; then
+        debug_flag="--debug"
+    fi
+    
     # Run the backup script with parallel method
     logInfo "Running backup with parallel method"
-    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --method=parallel --non-interactive"
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --method=parallel --non-interactive $debug_flag"
     
     # Verify backup integrity
     verify_backup "$SOURCE_MOUNT" "$DESTINATION_MOUNT" 0
@@ -741,6 +747,82 @@ EOF
     local dest_files=$(find "$DESTINATION_MOUNT" -type f | wc -l)
     assert "[ $dest_files -gt 0 ]" "Files should be copied to destination"
     
+    test_finish
+}
+
+# Test parallel backup with large number of files to verify batching
+test_parallel_large_file_set() {
+    test_init "Parallel backup with large file set (10,000+ files)"
+    
+    # Check for required commands
+    verify_command "parallel" || return 1
+    
+    # Create a large number of small files (10,000+)
+    logInfo "Creating large file set (10,000+ files)..."
+    mkdir -p "$SOURCE_MOUNT/large_set"
+    
+    # Create 10,000 small files (faster than creating large files)
+    for i in $(seq 1 100); do
+        # Create 100 directories with 100 files each = 10,000 files
+        mkdir -p "$SOURCE_MOUNT/large_set/dir_$i"
+        for j in $(seq 1 100); do
+            echo "Test content $i-$j" > "$SOURCE_MOUNT/large_set/dir_$i/file_$j.txt"
+        done
+        # Show progress every 10 directories
+        if [ $((i % 10)) -eq 0 ]; then
+            logInfo "Created $((i * 100)) files so far..."
+        fi
+    done
+    
+    # Verify file count
+    local file_count=$(find "$SOURCE_MOUNT" -type f | wc -l)
+    logInfo "Total files created: $file_count"
+    assert "[ $file_count -ge 10000 ]" "Should have at least 10,000 files for testing"
+    
+    # Create an exclude file to test both features together
+    cat > "$TEST_DIR/large_exclude.txt" << EOF
+large_set/dir_1/
+large_set/dir_2/
+*.log
+EOF
+    
+    # Run the backup with parallel method and exclude file
+    logInfo "Running parallel backup with large file set and exclude file"
+    time_start=$(date +%s)
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --method=parallel --exclude-from=\"$TEST_DIR/large_exclude.txt\" --non-interactive"
+    time_end=$(date +%s)
+    backup_duration=$((time_end - time_start))
+    logInfo "Backup completed in $backup_duration seconds"
+    
+    # Verify backup integrity with exclusions
+    logInfo "Verifying backup integrity..."
+    
+    # Check that excluded directories are not in the destination
+    assert "[ ! -d \"$DESTINATION_MOUNT/large_set/dir_1\" ]" "Excluded directory dir_1 should not be in destination"
+    assert "[ ! -d \"$DESTINATION_MOUNT/large_set/dir_2\" ]" "Excluded directory dir_2 should not be in destination"
+    
+    # Count files in destination
+    local dest_file_count=$(find "$DESTINATION_MOUNT" -type f | wc -l)
+    logInfo "Files in destination: $dest_file_count"
+    
+    # Expected count: total files minus excluded files (200 files in dir_1 and dir_2)
+    local expected_count=$((file_count - 200))
+    logInfo "Expected file count: $expected_count"
+    
+    # Allow for small differences due to potential test environment files
+    local diff=$((dest_file_count - expected_count))
+    assert "[ $diff -ge -5 ] && [ $diff -le 5 ]" "Destination file count should be close to expected count (within ±5 files)"
+    
+    # Verify content of a random sample of files
+    for i in $(seq 3 10 100); do
+        for j in $(seq 1 10 100); do
+            local source_content=$(cat "$SOURCE_MOUNT/large_set/dir_$i/file_$j.txt" 2>/dev/null)
+            local dest_content=$(cat "$DESTINATION_MOUNT/large_set/dir_$i/file_$j.txt" 2>/dev/null)
+            assertEquals "$source_content" "$dest_content" "Content of file dir_$i/file_$j.txt should match"
+        done
+    done
+    
+    logInfo "Large parallel backup test completed successfully"
     test_finish
 }
 

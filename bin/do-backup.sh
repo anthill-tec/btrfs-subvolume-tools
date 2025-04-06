@@ -24,6 +24,15 @@ EXCLUDE_FILES=()
 INTERACTIVE_EXCLUDE_MODE=false
 # Global variable for process IDs
 CP_PID=""
+DEBUG_MODE=false
+DEBUG_LOG=""
+
+# Debug logging function
+debug_log() {
+    if [ "$DEBUG_MODE" = true ]; then
+        echo "[DEBUG] $1" >> "$DEBUG_LOG"
+    fi
+}
 
 # Show help message
 show_help() {
@@ -49,6 +58,7 @@ show_help() {
   echo "                             (can be specified multiple times)"
   echo "  --exclude-from=FILE        Read exclude patterns from FILE (one pattern per line)"
   echo "  --show-excluded            Show interactive UI to review and modify excluded files"
+  echo "  --debug                    Enable debug mode with detailed logging"
   echo
   echo "Exclude Pattern Format:"
   echo "  - Simple glob patterns: *.log, tmp/, etc."
@@ -62,6 +72,7 @@ show_help() {
   echo "  $0 -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='tmp/'"
   echo "  $0 -s /home/user -d /mnt/backup/home --exclude-from=exclude_patterns.txt"
   echo "  $0 -s /home/user -d /mnt/backup/home --non-interactive"
+  echo "  $0 -s /home/user -d /mnt/backup/home --debug"
   echo
   echo "Automated usage:"
   echo "  For scripts, testing, and automated environments, always use the --non-interactive flag"
@@ -172,21 +183,34 @@ copy_data() {
     # Build find exclude options for parallel and cp methods
     FIND_EXCLUDE_OPTS=""
     if [ "$INTERACTIVE_EXCLUDE_MODE" != "true" ] && [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+        debug_log "Building find exclude options from ${#EXCLUDE_PATTERNS[@]} patterns"
         for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+            # Trim any whitespace
+            pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+            debug_log "Processing exclude pattern: '$pattern'"
+            
             # Handle different pattern types differently
-            if [[ "$pattern" == *"/"* ]]; then
-                # Directory pattern (contains slash)
-                dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash if present
-                FIND_EXCLUDE_OPTS+=" -not -path \"*/$dir_pattern/*\" -not -path \"*/$dir_pattern\""
+            if [[ "$pattern" == */ ]]; then
+                # Directory pattern with trailing slash
+                dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
+                debug_log "Directory pattern with trailing slash: '$dir_pattern'"
+                FIND_EXCLUDE_OPTS+=" -not -path \"$source/$dir_pattern/*\" -not -path \"$source/$dir_pattern\""
+            elif [[ "$pattern" == *"/"* ]]; then
+                # Path pattern (contains slash)
+                debug_log "Path pattern (contains slash): '$pattern'"
+                FIND_EXCLUDE_OPTS+=" -not -path \"$source/$pattern*\""
             elif [[ "$pattern" == \*.* ]]; then
                 # File extension pattern (e.g., *.log)
                 ext="${pattern#\*.}"
+                debug_log "File extension pattern: '*.$ext'"
                 FIND_EXCLUDE_OPTS+=" -not -name \"*.$ext\""
             else
                 # Other patterns
+                debug_log "Other pattern: '$pattern'"
                 FIND_EXCLUDE_OPTS+=" -not -name \"$pattern\""
             fi
         done
+        debug_log "Final find exclude options: $FIND_EXCLUDE_OPTS"
     fi
     
     case "$ACTUAL_BACKUP_METHOD" in
@@ -226,38 +250,119 @@ copy_data() {
                 # Use parallel with error handling that continues on errors
                 local error_log=$(mktemp)
                 
-                # Copy files with parallel, logging errors
-                find "$source" -type f $FIND_EXCLUDE_OPTS -print0 | \
-                    parallel --progress --bar --will-cite -0 \
-                    "cp --parents {} \"$destination\"/ 2>\"$error_log\" || echo \"Failed to copy: {}\" >> \"$error_log\""
+                echo -e "${BLUE}Copying files using parallel method...${NC}"
+                debug_log "Starting parallel backup with error handling=continue"
                 
-                # Copy directories (these rarely fail)
-                find "$source" -type d $FIND_EXCLUDE_OPTS -print0 | \
-                    parallel -0 mkdir -p "$destination/{/.}"
+                # First create the directory structure
+                echo -e "${BLUE}Creating directory structure...${NC}"
+                debug_log "Creating directory structure..."
+                eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                    rel_dir="${dir#$source}"
+                    if [ -n "$rel_dir" ]; then
+                        debug_log "Creating directory: $destination$rel_dir"
+                        mkdir -p "$destination$rel_dir"
+                    fi
+                done
+                
+                # Copy files in parallel with error handling
+                echo -e "${BLUE}Copying files...${NC}"
+                
+                # Create a temporary file with the list of files to copy
+                local files_list=$(mktemp)
+                debug_log "Files list: $files_list"
+                eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > "$files_list"
+                local total_files=$(wc -l < "$files_list")
+                echo -e "${YELLOW}Copying $total_files files in parallel...${NC}"
+                
+                # First try a simpler approach - process files one by one for better reliability
+                debug_log "Processing files one by one..."
+                while read -r file; do
+                    rel_file="${file#$source}"
+                    debug_log "Copying file: $file to $destination$rel_file"
+                    cp -a --reflink=auto "$file" "$destination$rel_file" 2>>"$error_log" || {
+                        echo "Failed to copy: $file to $destination$rel_file" >> "$error_log"
+                        debug_log "Failed to copy: $file to $destination$rel_file"
+                    }
+                done < "$files_list"
+                
+                # Clean up
+                debug_log "Cleaning up temporary files..."
+                rm -f "$files_list"
                 
                 # Check for errors in the log
                 if [ -s "$error_log" ]; then
                     echo -e "${YELLOW}Some files could not be copied:${NC}"
+                    debug_log "Errors detected:"
                     cat "$error_log" | while read -r line; do
                         echo -e "${YELLOW}  - $line${NC}"
+                        debug_log "  - $line"
                         FAILED_FILES+=("$line")
                     done
                     rm "$error_log"
                 fi
+                
+                if [ "$DEBUG_MODE" = true ]; then
+                    debug_log "Debug log contents:"
+                    debug_log "Destination directory listing:"
+                    ls -la "$destination" >> "$DEBUG_LOG"
+                    debug_log "Destination directory structure:"
+                    find "$destination" -type d | sort >> "$DEBUG_LOG"
+                    debug_log "Destination files:"
+                    find "$destination" -type f | sort >> "$DEBUG_LOG"
+                fi
             else
                 # Use parallel with strict error handling
-                find "$source" -type f $FIND_EXCLUDE_OPTS -print0 | \
-                    parallel --progress --bar --will-cite -0 cp --parents {} "$destination"/ || {
-                        echo -e "${RED}Failed to copy data${NC}"
-                        return 1
-                    }
+                # First create the directory structure
+                echo -e "${BLUE}Creating directory structure...${NC}"
+                debug_log "Creating directory structure..."
+                eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                    rel_dir="${dir#$source}"
+                    if [ -n "$rel_dir" ]; then
+                        debug_log "Creating directory: $destination$rel_dir"
+                        mkdir -p "$destination$rel_dir" || {
+                            echo -e "${RED}Failed to create directory: $destination$rel_dir${NC}"
+                            debug_log "Failed to create directory: $destination$rel_dir"
+                            return 1
+                        }
+                    fi
+                done
                 
-                # Copy directories and special files that parallel might have missed
-                find "$source" -type d $FIND_EXCLUDE_OPTS -print0 | \
-                    parallel -0 mkdir -p "$destination/{/.}" || {
-                        echo -e "${RED}Failed to create directories${NC}"
+                # Copy files with strict error handling
+                echo -e "${BLUE}Copying files...${NC}"
+                
+                # Create a temporary file with the list of files to copy
+                local files_list=$(mktemp)
+                debug_log "Files list: $files_list"
+                eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > "$files_list"
+                local total_files=$(wc -l < "$files_list")
+                echo -e "${YELLOW}Copying $total_files files...${NC}"
+                
+                # Process files one by one for better reliability
+                debug_log "Processing files one by one..."
+                while read -r file; do
+                    rel_file="${file#$source}"
+                    debug_log "Copying file: $file to $destination$rel_file"
+                    cp -a --reflink=auto "$file" "$destination$rel_file" || {
+                        echo -e "${RED}Failed to copy: $file to $destination$rel_file${NC}"
+                        debug_log "Failed to copy: $file to $destination$rel_file"
+                        rm -f "$files_list"
                         return 1
                     }
+                done < "$files_list"
+                
+                # Clean up
+                debug_log "Cleaning up temporary files..."
+                rm -f "$files_list"
+                
+                if [ "$DEBUG_MODE" = true ]; then
+                    debug_log "Debug log contents:"
+                    debug_log "Destination directory listing:"
+                    ls -la "$destination" >> "$DEBUG_LOG"
+                    debug_log "Destination directory structure:"
+                    find "$destination" -type d | sort >> "$DEBUG_LOG"
+                    debug_log "Destination files:"
+                    find "$destination" -type f | sort >> "$DEBUG_LOG"
+                fi
             fi
             ;;
         cp-progress)
@@ -318,10 +423,7 @@ copy_data() {
                     eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
                         rel_dir="${dir#$source}"
                         if [ -n "$rel_dir" ]; then
-                            mkdir -p "$destination/$rel_dir" || {
-                                echo -e "${RED}Failed to create directory: $destination/$rel_dir${NC}"
-                                return 1
-                            }
+                            mkdir -p "$destination/$rel_dir"
                         fi
                     done
                     
@@ -484,16 +586,31 @@ process_exclude_files() {
     
     if [ -f "$expanded_file" ]; then
       echo -e "${YELLOW}Reading exclude patterns from: $expanded_file${NC}"
+      debug_log "Reading exclude patterns from: $expanded_file"
       while IFS= read -r pattern || [ -n "$pattern" ]; do
         # Skip empty lines and comments
         if [[ -n "$pattern" && ! "$pattern" =~ ^[[:space:]]*# ]]; then
-          EXCLUDE_PATTERNS+=("$pattern")
+          # Trim leading and trailing whitespace
+          pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
+          if [ -n "$pattern" ]; then
+            EXCLUDE_PATTERNS+=("$pattern")
+            debug_log "Added exclude pattern: '$pattern'"
+          fi
         fi
       done < "$expanded_file"
     else
       echo -e "${RED}Warning: Exclude file not found: $exclude_file${NC}"
+      debug_log "Warning: Exclude file not found: $exclude_file"
     fi
   done
+  
+  # Log all patterns for debugging
+  if [ "$DEBUG_MODE" = true ] && [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+    debug_log "All exclude patterns:"
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+      debug_log "  - '$pattern'"
+    done
+  fi
 }
 
 # Preview files that will be excluded based on patterns
@@ -765,8 +882,8 @@ interactive_exclude_selection() {
   
   # Count files and directories matched by each pattern
   for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-    if [[ "$pattern" == *"/"* ]]; then
-      # Directory pattern (contains slash)
+    if [[ "$pattern" == */ ]]; then
+      # Directory pattern with trailing slash
       dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash if present
       
       # Count directories matching this pattern
@@ -781,6 +898,11 @@ interactive_exclude_selection() {
           files=$((files + dir_files))
         fi
       done
+      pattern_file_count["$pattern"]=$files
+      
+    elif [[ "$pattern" == *"/"* ]]; then
+      # Path pattern (contains slash)
+      local files=$(find "$SOURCE_DIR" -path "$pattern" -type f | wc -l)
       pattern_file_count["$pattern"]=$files
       
     elif [[ "$pattern" == \*.* ]]; then
@@ -1098,6 +1220,7 @@ do_backup() {
         else
             read -p "Continue with empty source? This will create an empty backup (Y/n): " -n 1 -r empty_backup_decision
             echo
+            
             # Default to "y" if user just presses Enter
             empty_backup_decision=${empty_backup_decision:-y}
             if [[ ! $empty_backup_decision =~ ^[Yy]$ ]]; then
@@ -1186,6 +1309,12 @@ parse_arguments() {
                 ;;
             --show-excluded)
                 SHOW_EXCLUDED=true
+                shift
+                ;;
+            --debug)
+                DEBUG_MODE=true
+                DEBUG_LOG=$(mktemp)
+                echo "Debug mode enabled. Log file: $DEBUG_LOG" >&2
                 shift
                 ;;
             *)
