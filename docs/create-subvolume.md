@@ -1,22 +1,23 @@
-% CREATE-SUBVOLUME(8) v1.0 | System Administration Commands
+# CREATE-SUBVOLUME(8) - BTRFS Subvolume Creation Utility
+
 %
 % March 2025
 
-# NAME
+## NAME
 
 create-subvolume - Create and configure btrfs subvolumes
 
-# SYNOPSIS
+## SYNOPSIS
 
 **create-subvolume** [OPTIONS]
 
-# DESCRIPTION
+## DESCRIPTION
 
 **create-subvolume** is a utility script for creating btrfs subvolumes and configuring the system to use them. It handles the complete workflow of backing up existing data, creating a new subvolume, copying data to it, and updating the system configuration.
 
 This tool is particularly useful when setting up a new subvolume layout on an existing btrfs filesystem. It can be run from both a normal system environment or an emergency/rescue shell.
 
-# OPTIONS
+## OPTIONS
 
 **-h, --help**
 : Show help message and exit
@@ -42,7 +43,7 @@ This tool is particularly useful when setting up a new subvolume layout on an ex
 **-n, --non-interactive**
 : Run without prompting for user input
 
-## Backup Options
+### Backup Options
 
 **--backup-method=METHOD**
 : Specify the method for copying data:
@@ -64,11 +65,11 @@ This tool is particularly useful when setting up a new subvolume layout on an ex
 **--debug**
 : Enable debug mode with detailed logging. This option provides verbose output about the backup process, including pattern matching details, file operations, and execution flow. Useful for troubleshooting exclude pattern issues or diagnosing backup failures.
 
-# RUNNING FROM EMERGENCY SHELL
+## RUNNING FROM EMERGENCY SHELL
 
 To properly create subvolumes on system mountpoints like /home, /var, etc., it's recommended to run this script from an emergency shell. This ensures no processes are using the target mountpoint during the operation.
 
-## Emergency Shell Preparation
+### Emergency Shell Preparation
 
 1. **Boot to emergency shell**:
 
@@ -111,7 +112,7 @@ To properly create subvolumes on system mountpoints like /home, /var, etc., it's
    create-subvolume.sh [OPTIONS]
    ```
 
-# EXAMPLES
+## EXAMPLES
 
 Create a subvolume for /home with default settings:
 
@@ -155,7 +156,7 @@ Create a subvolume with non-interactive mode for automated environments:
 create-subvolume.sh --backup --non-interactive
 ```
 
-# AUTOMATED USAGE
+## AUTOMATED USAGE
 
 When using this script in automated environments, testing frameworks, or any non-interactive context, always use the `--non-interactive` flag. Without this flag, the script will prompt for user input in certain scenarios, which can cause automation to hang indefinitely.
 
@@ -172,7 +173,7 @@ Example for automated usage:
 create-subvolume.sh --backup --target-mount /var --subvol-name @var --non-interactive
 ```
 
-# WORKFLOW
+## WORKFLOW
 
 The script performs the following operations:
 
@@ -183,7 +184,7 @@ The script performs the following operations:
 5. Updates system configuration (fstab entries)
 6. Cleans up temporary mounts and finalizes configuration
 
-# CONSIDERATIONS
+## CONSIDERATIONS
 
 **Root Privileges**
 : This script must be run with root privileges.
@@ -197,7 +198,7 @@ The script performs the following operations:
 **Backups**
 : Always have additional backups before running major filesystem operations.
 
-# FILES
+## FILES
 
 */etc/fstab*
 : Modified to include the new subvolume mount configuration
@@ -205,14 +206,14 @@ The script performs the following operations:
 */etc/fstab.bak*
 : Backup of the original fstab file
 
-# NOTES
+## NOTES
 
 This script uses the btrfs reflink feature to efficiently copy data when both source and destination are on btrfs filesystems. This significantly speeds up the copy process and reduces disk space usage.
 
-# SEE ALSO
+## SEE ALSO
 
 btrfs(8), btrfs-subvolume(8), do-backup(8), mount(8), fstab(5)
 
-# AUTHOR
+## AUTHOR
 
 This man page and script are provided as a utility for btrfs filesystem management.
