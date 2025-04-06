@@ -61,6 +61,9 @@ This tool is particularly useful when setting up a new subvolume layout on an ex
 : Additional options to pass to the backup command
   (Use with caution, options are passed directly to do-backup.sh)
 
+**--debug**
+: Enable debug mode with detailed logging. This option provides verbose output about the backup process, including pattern matching details, file operations, and execution flow. Useful for troubleshooting exclude pattern issues or diagnosing backup failures.
+
 # RUNNING FROM EMERGENCY SHELL
 
 To properly create subvolumes on system mountpoints like /home, /var, etc., it's recommended to run this script from an emergency shell. This ensures no processes are using the target mountpoint during the operation.

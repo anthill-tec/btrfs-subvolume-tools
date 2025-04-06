@@ -42,6 +42,9 @@ The script automatically selects the most efficient backup method based on avail
 * `-n, --non-interactive`  
   Run without prompting for user input.
 
+* `--debug`  
+  Enable debug mode with detailed logging. This option provides verbose output about the backup process, including pattern matching details, file operations, and execution flow. Useful for troubleshooting exclude pattern issues or diagnosing backup failures.
+
 * `--exclude=PATTERN`  
   Exclude files/directories matching PATTERN. This option can be specified multiple times to exclude different patterns.
 
