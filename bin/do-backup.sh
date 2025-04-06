@@ -174,6 +174,16 @@ generate_exclude_matches() {
   EXCLUDED_DIRS=()
   EXCLUDED_PATTERN_MATCHES=()
   
+  # Declare associative arrays to track pattern-specific matches
+  declare -g -A PATTERN_FILES
+  declare -g -A PATTERN_DIRS
+  
+  # Initialize the associative arrays
+  for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+    PATTERN_FILES["$pattern"]=""
+    PATTERN_DIRS["$pattern"]=""
+  done
+  
   # Process each pattern using the same logic as in copy_data
   echo -e "${BLUE}Analyzing exclude patterns...${NC}"
   
@@ -224,14 +234,18 @@ generate_exclude_matches() {
         if [ -n "$item" ]; then
           if [ -d "$item" ]; then
             EXCLUDED_DIRS+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_DIRS["$pattern"]+=" $item"
           elif [ -f "$item" ]; then
             EXCLUDED_FILES+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_FILES["$pattern"]+=" $item"
           fi
         fi
       done < "$output_file"
       
-      # Store the find command for this pattern - will be used to build FIND_EXCLUDE_OPTS
-      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
+      # Store the find command for this pattern
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name\" -not -path \"*/$dir_name/*\""
       
       # Clean up
       rm -f "$output_file"
@@ -259,14 +273,18 @@ generate_exclude_matches() {
         if [ -n "$item" ]; then
           if [ -d "$item" ]; then
             EXCLUDED_DIRS+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_DIRS["$pattern"]+=" $item"
           elif [ -f "$item" ]; then
             EXCLUDED_FILES+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_FILES["$pattern"]+=" $item"
           fi
         fi
       done < "$output_file"
       
-      # Store the find command for this pattern - will be used to build FIND_EXCLUDE_OPTS
-      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
+      # Store the find command for this pattern
+      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$dir_name\" -not -path \"*/$dir_name/*\""
       
       # Clean up
       rm -f "$output_file"
@@ -284,6 +302,8 @@ generate_exclude_matches() {
       # First find the directory itself at the top level
       if [ -d "$source_dir/$dir_name" ]; then
         EXCLUDED_DIRS+=("$source_dir/$dir_name")
+        # Also store in pattern-specific array
+        PATTERN_DIRS["$pattern"]+=" $source_dir/$dir_name"
         debug_pattern_log "Excluding top-level directory: $source_dir/$dir_name"
       fi
       
@@ -298,6 +318,8 @@ generate_exclude_matches() {
       while read -r item; do
         if [ -n "$item" ]; then
           EXCLUDED_DIRS+=("$item")
+          # Also store in pattern-specific array
+          PATTERN_DIRS["$pattern"]+=" $item"
           debug_pattern_log "Excluding directory: $item"
         fi
       done < "$output_file"
@@ -330,8 +352,12 @@ generate_exclude_matches() {
         if [ -n "$item" ]; then
           if [ -d "$item" ]; then
             EXCLUDED_DIRS+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_DIRS["$pattern"]+=" $item"
           elif [ -f "$item" ]; then
             EXCLUDED_FILES+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_FILES["$pattern"]+=" $item"
           fi
         fi
       done < "$output_file"
@@ -378,8 +404,12 @@ generate_exclude_matches() {
         if [ -n "$item" ]; then
           if [ -d "$item" ]; then
             EXCLUDED_DIRS+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_DIRS["$pattern"]+=" $item"
           elif [ -f "$item" ]; then
             EXCLUDED_FILES+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_FILES["$pattern"]+=" $item"
           fi
         fi
       done < "$output_file"
@@ -407,6 +437,8 @@ generate_exclude_matches() {
       while read -r item; do
         if [ -n "$item" ]; then
           EXCLUDED_FILES+=("$item")
+          # Also store in pattern-specific array
+          PATTERN_FILES["$pattern"]+=" $item"
         fi
       done < "$output_file"
       
@@ -453,8 +485,12 @@ generate_exclude_matches() {
         if [ -n "$item" ]; then
           if [ -d "$item" ]; then
             EXCLUDED_DIRS+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_DIRS["$pattern"]+=" $item"
           elif [ -f "$item" ]; then
             EXCLUDED_FILES+=("$item")
+            # Also store in pattern-specific array
+            PATTERN_FILES["$pattern"]+=" $item"
           fi
         fi
       done < "$output_file"
@@ -475,6 +511,8 @@ generate_exclude_matches() {
       # First find the directory itself at the top level
       if [ -d "$source_dir/$dir_name" ]; then
         EXCLUDED_DIRS+=("$source_dir/$dir_name")
+        # Also store in pattern-specific array
+        PATTERN_DIRS["$pattern"]+=" $source_dir/$dir_name"
         debug_pattern_log "Excluding top-level directory: $source_dir/$dir_name"
       fi
       
@@ -489,6 +527,8 @@ generate_exclude_matches() {
       while read -r item; do
         if [ -n "$item" ]; then
           EXCLUDED_DIRS+=("$item")
+          # Also store in pattern-specific array
+          PATTERN_DIRS["$pattern"]+=" $item"
           debug_pattern_log "Excluding directory: $item"
         fi
       done < "$output_file"
@@ -499,6 +539,7 @@ generate_exclude_matches() {
       
       # Clean up
       rm -f "$output_file"
+      
     else
       # Other patterns
       echo -e "${YELLOW}  Other pattern: '$pattern'${NC}"
@@ -513,6 +554,8 @@ generate_exclude_matches() {
         echo -e "${YELLOW}  Directory name pattern: '$pattern'${NC}"
         debug_pattern_log "Directory name pattern: '$pattern'"
         EXCLUDED_DIRS+=("$source_dir/$pattern")
+        # Also store in pattern-specific array
+        PATTERN_DIRS["$pattern"]+=" $source_dir/$pattern"
         debug_pattern_log "Excluding directory: $source_dir/$pattern"
         
         # Store the find command for this pattern
@@ -530,8 +573,12 @@ generate_exclude_matches() {
           if [ -n "$item" ]; then
             if [ -d "$item" ]; then
               EXCLUDED_DIRS+=("$item")
+              # Also store in pattern-specific array
+              PATTERN_DIRS["$pattern"]+=" $item"
             elif [ -f "$item" ]; then
               EXCLUDED_FILES+=("$item")
+              # Also store in pattern-specific array
+              PATTERN_FILES["$pattern"]+=" $item"
             fi
           fi
         done < "$output_file"
@@ -542,6 +589,7 @@ generate_exclude_matches() {
       
       # Clean up
       rm -f "$output_file"
+      
     fi
     
     # Increment pattern index
@@ -869,9 +917,8 @@ copy_data() {
                     
                     debug_log "Copying $file to $destination/$rel_file"
                     cp -a --reflink=auto "$file" "$destination/$rel_file" || {
-                        echo -e "${RED}Failed to copy: $file to $destination/$rel_file${NC}"
-                        debug_log "Failed to copy: $file to $destination/$rel_file"
-                        rm -f "$files_list"
+                        echo -e "${RED}Failed to copy file: $file${NC}"
+                        rm "$files_list"
                         return 1
                     }
                 done < "$files_list"
@@ -1250,35 +1297,35 @@ preview_excluded_files() {
         # Directory pattern with trailing slash
         dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
         if [ "$first" = true ]; then
-          find_cmd+=" -path \"*/$dir_pattern/*\" -o -path \"*/$dir_pattern\""
+          find_cmd+=" -not -path \"*/$dir_pattern/*\" -not -path \"*/$dir_pattern\""
           first=false
         else
-          find_cmd+=" -o -path \"*/$dir_pattern/*\" -o -path \"*/$dir_pattern\""
+          find_cmd+=" -not -path \"*/$dir_pattern/*\" -not -path \"*/$dir_pattern\""
         fi
       elif [[ "$pattern" == *"/"* ]]; then
         # Path pattern (contains slash)
         if [ "$first" = true ]; then
-          find_cmd+=" -path \"$pattern*\""
+          find_cmd+=" -not -path \"$pattern*\""
           first=false
         else
-          find_cmd+=" -o -path \"$pattern*\""
+          find_cmd+=" -not -path \"$pattern*\""
         fi
       elif [[ "$pattern" == \*.* ]]; then
         # File extension pattern (e.g., *.log)
         ext="${pattern#\*.}"
         if [ "$first" = true ]; then
-          find_cmd+=" -name \"*.$ext\""
+          find_cmd+=" -not -name \"*.$ext\""
           first=false
         else
-          find_cmd+=" -o -name \"*.$ext\""
+          find_cmd+=" -not -name \"*.$ext\""
         fi
       else
         # Other patterns
         if [ "$first" = true ]; then
-          find_cmd+=" -name \"$pattern\""
+          find_cmd+=" -not -name \"$pattern\""
           first=false
         else
-          find_cmd+=" -o -name \"$pattern\""
+          find_cmd+=" -not -name \"$pattern\""
         fi
       fi
     done
@@ -1503,6 +1550,10 @@ interactive_exclude_selection() {
     # Generate exclude matches using the shared function
     generate_exclude_matches "$source_dir"
     
+    # Arrays to track user selections
+    local KEEP_FILES=()
+    local KEEP_DIRS=()
+    
     # Process each pattern
     for pattern in "${EXCLUDE_PATTERNS[@]}"; do
         # Trim any whitespace
@@ -1515,23 +1566,20 @@ interactive_exclude_selection() {
         
         echo -e "${BLUE}Showing matches for pattern: $pattern${NC}"
         
-        # Filter the excluded files and directories for this pattern
+        # Get the pre-matched files and directories for this pattern
         local pattern_files=()
         local pattern_dirs=()
         
-        # For each excluded file, check if it matches the current pattern
-        for file in "${EXCLUDED_FILES[@]}"; do
-            # Check if the file matches this pattern
-            if [[ "$file" == *"$pattern"* ]] || [[ "$file" =~ $pattern ]]; then
-                pattern_files+=("$file")
+        # Convert space-separated string to array
+        for item in ${PATTERN_FILES["$pattern"]}; do
+            if [ -n "$item" ]; then
+                pattern_files+=("$item")
             fi
         done
         
-        # For each excluded directory, check if it matches the current pattern
-        for dir in "${EXCLUDED_DIRS[@]}"; do
-            # Check if the directory matches this pattern
-            if [[ "$dir" == *"$pattern"* ]] || [[ "$dir" =~ $pattern ]]; then
-                pattern_dirs+=("$dir")
+        for item in ${PATTERN_DIRS["$pattern"]}; do
+            if [ -n "$item" ]; then
+                pattern_dirs+=("$item")
             fi
         done
         
@@ -1581,52 +1629,56 @@ interactive_exclude_selection() {
                     selected_array+=($index)
                 done
                 
-                # Create a new array for items to keep
-                local keep_items=()
-                
                 # Loop through all items and keep only those not selected
-                for ((j=1; j<=${#all_items[@]}; j++)); do
+                local j=1
+                for item in "${all_items[@]}"; do
                     # Check if this index is in the selected array
                     if ! [[ " ${selected_array[@]} " =~ " $j " ]]; then
                         # This item was not selected, so keep it
-                        keep_items+=("${all_items[$j-1]}")
+                        if [ -d "$item" ]; then
+                            KEEP_DIRS+=("$item")
+                        else
+                            KEEP_FILES+=("$item")
+                        fi
                     fi
-                done
-                
-                # Replace the original arrays with the filtered ones
-                local new_excluded_files=()
-                local new_excluded_dirs=()
-                
-                # Add all excluded files that were not in the current pattern
-                for file in "${EXCLUDED_FILES[@]}"; do
-                    if ! [[ " ${all_items[@]} " =~ " $file " ]] || [[ " ${keep_items[@]} " =~ " $file " ]]; then
-                        new_excluded_files+=("$file")
-                    fi
-                done
-                
-                # Add all excluded directories that were not in the current pattern
-                for dir in "${EXCLUDED_DIRS[@]}"; do
-                    if ! [[ " ${all_items[@]} " =~ " $dir " ]] || [[ " ${keep_items[@]} " =~ " $dir " ]]; then
-                        new_excluded_dirs+=("$dir")
-                    fi
-                done
-                
-                # Update the arrays
-                EXCLUDED_FILES=("${new_excluded_files[@]}")
-                EXCLUDED_DIRS=("${new_excluded_dirs[@]}")
-                
-                # Rebuild FIND_EXCLUDE_OPTS based on the updated exclusion lists
-                FIND_EXCLUDE_OPTS=""
-                for file in "${EXCLUDED_FILES[@]}"; do
-                    FIND_EXCLUDE_OPTS+=" -not -path \"$file\""
-                done
-                
-                for dir in "${EXCLUDED_DIRS[@]}"; do
-                    FIND_EXCLUDE_OPTS+=" -not -path \"$dir\" -not -path \"$dir/*\""
+                    j=$((j + 1))
                 done
             fi
+        else
+            # Dialog was cancelled
+            echo -e "${YELLOW}Dialog cancelled for pattern: $pattern${NC}"
+            rm -rf "$temp_dir"
+            return 1
         fi
     done
+    
+    # Show a summary of what will be excluded
+    local excluded_dir_count=$((${#EXCLUDED_DIRS[@]} - ${#KEEP_DIRS[@]}))
+    local excluded_file_count=$((${#EXCLUDED_FILES[@]} - ${#KEEP_FILES[@]}))
+    
+    dialog --title "Exclude Summary" --backtitle "BTRFS Backup Utility" \
+        --msgbox "The backup will exclude:\n\n- $excluded_dir_count directories\n- $excluded_file_count files\n\nSelected patterns will be applied to the backup process." 15 70
+    
+    # Rebuild the EXCLUDED_FILES and EXCLUDED_DIRS arrays based on user selections
+    local new_excluded_files=()
+    local new_excluded_dirs=()
+    
+    # Add all items that weren't kept
+    for file in "${EXCLUDED_FILES[@]}"; do
+        if ! [[ " ${KEEP_FILES[@]} " =~ " $file " ]]; then
+            new_excluded_files+=("$file")
+        fi
+    done
+    
+    for dir in "${EXCLUDED_DIRS[@]}"; do
+        if ! [[ " ${KEEP_DIRS[@]} " =~ " $dir " ]]; then
+            new_excluded_dirs+=("$dir")
+        fi
+    done
+    
+    # Update the global arrays
+    EXCLUDED_FILES=("${new_excluded_files[@]}")
+    EXCLUDED_DIRS=("${new_excluded_dirs[@]}")
     
     # Set flag to indicate dialog was shown and user has edited exclusions
     DIALOG_SHOWN=true
