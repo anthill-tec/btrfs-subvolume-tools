@@ -507,26 +507,38 @@ generate_exclude_matches() {
       # Create a temporary file to store matched items
       local output_file=$(mktemp)
       
-      # Run the find command in background to show progress
-      (find "$source_dir" -name "$pattern" > "$output_file") &
-      local find_pid=$!
-      
-      # Show progress while find is running
-      show_progress $find_pid
-      
-      # Process results
-      while read -r item; do
-        if [ -n "$item" ]; then
-          if [ -d "$item" ]; then
-            EXCLUDED_DIRS+=("$item")
-          elif [ -f "$item" ]; then
-            EXCLUDED_FILES+=("$item")
+      # First check if this is a directory name
+      if [ -d "$source_dir/$pattern" ]; then
+        # This is a directory, exclude it and its contents
+        echo -e "${YELLOW}  Directory name pattern: '$pattern'${NC}"
+        debug_pattern_log "Directory name pattern: '$pattern'"
+        EXCLUDED_DIRS+=("$source_dir/$pattern")
+        debug_pattern_log "Excluding directory: $source_dir/$pattern"
+        
+        # Store the find command for this pattern
+        EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -path \"*/$pattern\" -not -path \"*/$pattern/*\""
+      else
+        # Run the find command in background to show progress
+        (find "$source_dir" -name "$pattern" > "$output_file") &
+        local find_pid=$!
+        
+        # Show progress while find is running
+        show_progress $find_pid
+        
+        # Process results
+        while read -r item; do
+          if [ -n "$item" ]; then
+            if [ -d "$item" ]; then
+              EXCLUDED_DIRS+=("$item")
+            elif [ -f "$item" ]; then
+              EXCLUDED_FILES+=("$item")
+            fi
           fi
-        fi
-      done < "$output_file"
-      
-      # Store the find command for this pattern
-      EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -name \"$pattern\""
+        done < "$output_file"
+        
+        # Store the find command for this pattern
+        EXCLUDED_PATTERN_MATCHES[$pattern_index]="-not -name \"$pattern\""
+      fi
       
       # Clean up
       rm -f "$output_file"
@@ -754,14 +766,14 @@ copy_data() {
                     # Extract relative path correctly regardless of trailing slash
                     rel_file="${file#$normalized_source}"
                     rel_file="${rel_file#/}"  # Remove leading slash if present
-                    debug_log "Original file: $file"
-                    debug_log "Extracted rel_file: $rel_file"
                     
-                    # Create parent directory if it doesn't exist
-                    parent_dir="$(dirname "$destination/$rel_file")"
-                    if [ ! -d "$parent_dir" ]; then
-                        debug_log "Creating parent directory: $parent_dir"
-                        mkdir -p "$parent_dir"
+                    # Create parent directory if it doesn't exist and if the file is in a subdirectory
+                    if [[ "$rel_file" == */* ]]; then
+                        parent_dir="$(dirname "$destination/$rel_file")"
+                        if [ ! -d "$parent_dir" ]; then
+                            debug_log "Creating parent directory: $parent_dir"
+                            mkdir -p "$parent_dir"
+                        fi
                     fi
                     
                     debug_log "Copying $file to $destination/$rel_file"
@@ -845,14 +857,14 @@ copy_data() {
                     # Extract relative path correctly regardless of trailing slash
                     rel_file="${file#$normalized_source}"
                     rel_file="${rel_file#/}"  # Remove leading slash if present
-                    debug_log "Original file: $file"
-                    debug_log "Extracted rel_file: $rel_file"
                     
-                    # Create parent directory if it doesn't exist
-                    parent_dir="$(dirname "$destination/$rel_file")"
-                    if [ ! -d "$parent_dir" ]; then
-                        debug_log "Creating parent directory: $parent_dir"
-                        mkdir -p "$parent_dir"
+                    # Create parent directory if it doesn't exist and if the file is in a subdirectory
+                    if [[ "$rel_file" == */* ]]; then
+                        parent_dir="$(dirname "$destination/$rel_file")"
+                        if [ ! -d "$parent_dir" ]; then
+                            debug_log "Creating parent directory: $parent_dir"
+                            mkdir -p "$parent_dir"
+                        fi
                     fi
                     
                     debug_log "Copying $file to $destination/$rel_file"
@@ -890,7 +902,12 @@ copy_data() {
                     
                     # Create destination directories first
                     eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        # Extract the relative path from the source directory
+                        # This handles both cases with and without trailing slash
                         rel_dir="${dir#$source}"
+                        rel_dir="${rel_dir#/}"  # Remove leading slash if present
+                        
+                        # Only create non-empty relative directories
                         if [ -n "$rel_dir" ]; then
                             mkdir -p "$destination/$rel_dir"
                         fi
@@ -912,11 +929,13 @@ copy_data() {
                     cat /tmp/files_to_copy.txt | while read -r file; do
                         rel_file="${file#$source/}"
                         
-                        # Create parent directory if it doesn't exist
-                        parent_dir="$(dirname "$destination/$rel_file")"
-                        if [ ! -d "$parent_dir" ]; then
-                            debug_log "Creating parent directory: $parent_dir"
-                            mkdir -p "$parent_dir"
+                        # Create parent directory if it doesn't exist and if the file is in a subdirectory
+                        if [[ "$rel_file" == */* ]]; then
+                            parent_dir="$(dirname "$destination/$rel_file")"
+                            if [ ! -d "$parent_dir" ]; then
+                                debug_log "Creating parent directory: $parent_dir"
+                                mkdir -p "$parent_dir"
+                            fi
                         fi
                         
                         cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || true
@@ -951,7 +970,12 @@ copy_data() {
                     
                     # Create destination directories first
                     eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        # Extract the relative path from the source directory
+                        # This handles both cases with and without trailing slash
                         rel_dir="${dir#$source}"
+                        rel_dir="${rel_dir#/}"  # Remove leading slash if present
+                        
+                        # Only create non-empty relative directories
                         if [ -n "$rel_dir" ]; then
                             mkdir -p "$destination/$rel_dir"
                         fi
@@ -973,11 +997,13 @@ copy_data() {
                     cat /tmp/files_to_copy.txt | while read -r file; do
                         rel_file="${file#$source/}"
                         
-                        # Create parent directory if it doesn't exist
-                        parent_dir="$(dirname "$destination/$rel_file")"
-                        if [ ! -d "$parent_dir" ]; then
-                            debug_log "Creating parent directory: $parent_dir"
-                            mkdir -p "$parent_dir"
+                        # Create parent directory if it doesn't exist and if the file is in a subdirectory
+                        if [[ "$rel_file" == */* ]]; then
+                            parent_dir="$(dirname "$destination/$rel_file")"
+                            if [ ! -d "$parent_dir" ]; then
+                                debug_log "Creating parent directory: $parent_dir"
+                                mkdir -p "$parent_dir"
+                            fi
                         fi
                         
                         cp -a --reflink=auto "$file" "$destination/$rel_file" || {
@@ -1013,7 +1039,12 @@ copy_data() {
                     
                     # Create destination directories first
                     eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        # Extract the relative path from the source directory
+                        # This handles both cases with and without trailing slash
                         rel_dir="${dir#$source}"
+                        rel_dir="${rel_dir#/}"  # Remove leading slash if present
+                        
+                        # Only create non-empty relative directories
                         if [ -n "$rel_dir" ]; then
                             mkdir -p "$destination/$rel_dir"
                         fi
@@ -1033,13 +1064,18 @@ copy_data() {
                     fi
                     
                     cat /tmp/files_to_copy.txt | while read -r file; do
-                        rel_file="${file#$source/}"
+                        # Extract the relative path from the source directory
+                        # This handles both cases with and without trailing slash
+                        rel_file="${file#$source}"
+                        rel_file="${rel_file#/}"  # Remove leading slash if present
                         
-                        # Create parent directory if it doesn't exist
-                        parent_dir="$(dirname "$destination/$rel_file")"
-                        if [ ! -d "$parent_dir" ]; then
-                            debug_log "Creating parent directory: $parent_dir"
-                            mkdir -p "$parent_dir"
+                        # Create parent directory if it doesn't exist and if the file is in a subdirectory
+                        if [[ "$rel_file" == */* ]]; then
+                            parent_dir="$(dirname "$destination/$rel_file")"
+                            if [ ! -d "$parent_dir" ]; then
+                                debug_log "Creating parent directory: $parent_dir"
+                                mkdir -p "$parent_dir"
+                            fi
                         fi
                         
                         cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || true
@@ -1070,7 +1106,12 @@ copy_data() {
                     
                     # Create destination directories first
                     eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
+                        # Extract the relative path from the source directory
+                        # This handles both cases with and without trailing slash
                         rel_dir="${dir#$source}"
+                        rel_dir="${rel_dir#/}"  # Remove leading slash if present
+                        
+                        # Only create non-empty relative directories
                         if [ -n "$rel_dir" ]; then
                             mkdir -p "$destination/$rel_dir"
                         fi
@@ -1090,13 +1131,18 @@ copy_data() {
                     fi
                     
                     cat /tmp/files_to_copy.txt | while read -r file; do
-                        rel_file="${file#$source/}"
+                        # Extract the relative path from the source directory
+                        # This handles both cases with and without trailing slash
+                        rel_file="${file#$source}"
+                        rel_file="${rel_file#/}"  # Remove leading slash if present
                         
-                        # Create parent directory if it doesn't exist
-                        parent_dir="$(dirname "$destination/$rel_file")"
-                        if [ ! -d "$parent_dir" ]; then
-                            debug_log "Creating parent directory: $parent_dir"
-                            mkdir -p "$parent_dir"
+                        # Create parent directory if it doesn't exist and if the file is in a subdirectory
+                        if [[ "$rel_file" == */* ]]; then
+                            parent_dir="$(dirname "$destination/$rel_file")"
+                            if [ ! -d "$parent_dir" ]; then
+                                debug_log "Creating parent directory: $parent_dir"
+                                mkdir -p "$parent_dir"
+                            fi
                         fi
                         
                         cp -a --reflink=auto "$file" "$destination/$rel_file" || {

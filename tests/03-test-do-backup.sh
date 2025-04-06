@@ -1004,6 +1004,9 @@ test_exclude_from_file() {
     local SOURCE_DIR="$TEMP_DIR/source"
     local DEST_DIR="$TEMP_DIR/dest"
     
+    # Clean up any existing files from previous tests
+    rm -rf "$SOURCE_DIR" "$DEST_DIR"
+    
     mkdir -p "$SOURCE_DIR"
     mkdir -p "$SOURCE_DIR/test_dir"  # Create test_dir directory
     mkdir -p "$DEST_DIR"
@@ -1014,6 +1017,7 @@ test_exclude_from_file() {
     
     # Create a test exclude file with patterns
     local EXCLUDE_FILE="$TEMP_DIR/exclude_patterns.txt"
+    rm -f "$EXCLUDE_FILE"
     cat > "$EXCLUDE_FILE" << EOF
 # This is a comment
 *.tmp
@@ -1050,6 +1054,9 @@ EOF
     # Check that only 1 file was copied
     local file_count=$(find "$DEST_DIR" -type f | wc -l)
     assert "[ $file_count -eq 1 ]" "Only 1 file (important.txt) should be copied to destination"
+    
+    # Clean up after test
+    rm -rf "$SOURCE_DIR" "$DEST_DIR" "$EXCLUDE_FILE"
     
     test_finish
 }
