@@ -23,7 +23,9 @@ TEMP_MOUNT_PATH=""
 ERROR_HANDLING="strict"
 FAILED_FILES=()
 # Additional backup options
-BACKUP_EXTRA_OPTS=""
+EXCLUDE_PATTERNS=()
+EXCLUDE_FILES=()
+SHOW_EXCLUDED=false
 
 #
 # Utility functions
@@ -55,8 +57,10 @@ show_help() {
   echo "  --error-handling=MODE      Specify how to handle file copy errors:"
   echo "                             strict: Stop on first error (default)"
   echo "                             continue: Skip problem files and continue"
-  echo "  --backup-extra-opts=\"OPTS\" Additional options to pass to the backup command"
-  echo "                             (Use with caution, options are passed directly)"
+  echo "  --exclude=PATTERN          Exclude files/directories matching PATTERN"
+  echo "                             (can be specified multiple times)"
+  echo "  --exclude-from=FILE        Read exclude patterns from FILE (one pattern per line)"
+  echo "  --show-excluded            Show interactive UI to review and modify excluded files"
   echo
   echo "Examples:"
   echo "  $0 --backup"
@@ -334,22 +338,27 @@ handle_backup() {
     backup_cmd+=" --non-interactive"
   fi
   
-  # Execute the backup command - don't pass BACKUP_EXTRA_OPTS directly
-  # as do-backup.sh doesn't support all options like --exclude
-  echo -e "${YELLOW}Executing: $backup_cmd${NC}"
-  
-  # Create a temporary wrapper script to handle extra options like exclude
-  if [ -n "$BACKUP_EXTRA_OPTS" ]; then
-    echo -e "${YELLOW}Using extra backup options: $BACKUP_EXTRA_OPTS${NC}"
-    
-    # Extract exclude patterns if present
-    local exclude_patterns=""
-    if [[ "$BACKUP_EXTRA_OPTS" == *"--exclude="* ]]; then
-      # Extract the exclude pattern from the options
-      exclude_patterns=$(echo "$BACKUP_EXTRA_OPTS" | grep -o -- "--exclude=[^ ]*" | cut -d= -f2)
-      echo -e "${YELLOW}Excluding: $exclude_patterns${NC}"
-    fi
+  # Pass through exclude patterns
+  if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+    for pattern in "${EXCLUDE_PATTERNS[@]}"; do
+      backup_cmd+=" --exclude='$pattern'"
+    done
   fi
+  
+  # Pass through exclude files
+  if [ ${#EXCLUDE_FILES[@]} -gt 0 ]; then
+    for file in "${EXCLUDE_FILES[@]}"; do
+      backup_cmd+=" --exclude-from='$file'"
+    done
+  fi
+  
+  # Pass through show-excluded option
+  if [ "$SHOW_EXCLUDED" = true ]; then
+    backup_cmd+=" --show-excluded"
+  fi
+  
+  # Execute the backup command
+  echo -e "${YELLOW}Executing: $backup_cmd${NC}"
   
   # Run the backup command
   eval "$backup_cmd"
@@ -651,7 +660,22 @@ main() {
   echo -e "  Non-Interactive:  ${YELLOW}$NON_INTERACTIVE${NC}"
   echo -e "  Backup Method:    ${YELLOW}$BACKUP_METHOD${NC}"
   echo -e "  Error Handling:   ${YELLOW}$ERROR_HANDLING${NC}"
-  echo -e "  Backup Extra Options: ${YELLOW}$BACKUP_EXTRA_OPTS${NC}"
+  
+  # Display exclude patterns if any
+  if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+    echo -e "  Exclude Patterns: ${YELLOW}${EXCLUDE_PATTERNS[*]}${NC}"
+  fi
+  
+  # Display exclude files if any
+  if [ ${#EXCLUDE_FILES[@]} -gt 0 ]; then
+    echo -e "  Exclude Files:    ${YELLOW}${EXCLUDE_FILES[*]}${NC}"
+  fi
+  
+  # Display show-excluded option if enabled
+  if [ "$SHOW_EXCLUDED" = true ]; then
+    echo -e "  Show Excluded:    ${YELLOW}true${NC}"
+  fi
+  
   echo
   
   # Set up global trap for clean cancellation
@@ -748,8 +772,16 @@ parse_arguments() {
         esac
         shift
         ;;
-      --backup-extra-opts=*)
-        BACKUP_EXTRA_OPTS="${1#*=}"
+      --exclude=*)
+        EXCLUDE_PATTERNS+=("${1#*=}")
+        shift
+        ;;
+      --exclude-from=*)
+        EXCLUDE_FILES+=("${1#*=}")
+        shift
+        ;;
+      --show-excluded)
+        SHOW_EXCLUDED=true
         shift
         ;;
       *)
