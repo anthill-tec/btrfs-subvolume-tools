@@ -61,6 +61,12 @@ show_help() {
   echo "  $0 -s /home/user -d /mnt/backup/home --error-handling=continue"
   echo "  $0 -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='tmp/'"
   echo "  $0 -s /home/user -d /mnt/backup/home --exclude-from=exclude_patterns.txt"
+  echo "  $0 -s /home/user -d /mnt/backup/home --non-interactive"
+  echo
+  echo "Automated usage:"
+  echo "  For scripts, testing, and automated environments, always use the --non-interactive flag"
+  echo "  to prevent the script from waiting for user input. Without this flag, the script may"
+  echo "  prompt for confirmation in certain scenarios, causing automation to hang indefinitely."
   echo
 }
 

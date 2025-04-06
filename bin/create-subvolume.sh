@@ -67,6 +67,11 @@ show_help() {
   echo "  $0 --target-mount /var --subvol-name @var"
   echo "  $0 --backup --backup-drive /dev/sdc1 --backup-mount /mnt/mybackup"
   echo "  $0 --backup --backup-method=parallel --error-handling=continue"
+  echo "  $0 --backup --non-interactive --exclude='*.tmp' --exclude='cache/'"
+  echo
+  echo "Automated usage:"
+  echo "  For scripts and automated environments, always use the --non-interactive flag"
+  echo "  to prevent the script from waiting for user input."
   echo
 }
 

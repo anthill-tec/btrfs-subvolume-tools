@@ -274,6 +274,36 @@ The script handles user interruptions (Ctrl+C) gracefully:
   do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --non-interactive
   ```
 
+## AUTOMATED USAGE
+
+When using this script in automated environments, testing frameworks, or any non-interactive context, always use the `--non-interactive` flag. This is critical because without this flag, the script will prompt for user input in certain scenarios, which can cause automation to hang indefinitely.
+
+The `--non-interactive` flag ensures that:
+
+* The script will not wait for user confirmation at any point
+* Default values will be used when decisions are needed
+* Error messages will still be displayed for logging purposes
+* The script will exit with appropriate error codes on failure
+
+Scenarios where the script might prompt for input without this flag:
+
+* Empty source directory detection
+* Confirmation of exclude patterns
+* Handling of special files
+* Error recovery options
+
+Example for automated usage in a testing environment:
+
+```bash
+do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='cache/' --non-interactive
+```
+
+Example for automated usage in a scheduled backup script:
+
+```bash
+do-backup.sh -s /var/www -d /mnt/backup/www --method=tar --error-handling=continue --non-interactive
+```
+
 ## NOTES
 
 * The script automatically handles hidden files and directories.

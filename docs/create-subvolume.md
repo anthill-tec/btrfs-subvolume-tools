@@ -42,7 +42,7 @@ This tool is particularly useful when setting up a new subvolume layout on an ex
 **-n, --non-interactive**
 : Run without prompting for user input
 
-### Backup Options
+## Backup Options
 
 **--backup-method=METHOD**
 : Specify the method for copying data:
@@ -92,19 +92,19 @@ To properly create subvolumes on system mountpoints like /home, /var, etc., it's
 
 2. **Remount root filesystem as read-write**:
 
-   ```
+   ```bash
    mount -o remount,rw /
    ```
 
 3. **Ensure network if needed**:
 
-   ```
+   ```bash
    systemctl start systemd-networkd
    ```
 
 4. **Run the script**:
 
-   ```
+   ```bash
    create-subvolume.sh [OPTIONS]
    ```
 
@@ -112,38 +112,61 @@ To properly create subvolumes on system mountpoints like /home, /var, etc., it's
 
 Create a subvolume for /home with default settings:
 
-```
+```bash
 create-subvolume.sh
 ```
 
 Create a subvolume with backup:
 
-```
+```bash
 create-subvolume.sh --backup
 ```
 
 Create a subvolume for /var:
 
-```
+```bash
 create-subvolume.sh --target-mount /var --subvol-name @var
 ```
 
 Create a subvolume with custom backup location:
 
-```
+```bash
 create-subvolume.sh --backup --backup-drive /dev/sdc1 --backup-mount /mnt/mybackup
 ```
 
 Create a subvolume with parallel backup method and continue on errors:
 
-```
+```bash
 create-subvolume.sh --backup --backup-method=parallel --error-handling=continue
 ```
 
 Create a subvolume with custom backup options:
 
-```
+```bash
 create-subvolume.sh --backup --backup-extra-opts="--exclude=/home/user/tmp"
+```
+
+Create a subvolume with non-interactive mode for automated environments:
+
+```bash
+create-subvolume.sh --backup --non-interactive
+```
+
+# AUTOMATED USAGE
+
+When using this script in automated environments, testing frameworks, or any non-interactive context, always use the `--non-interactive` flag. Without this flag, the script will prompt for user input in certain scenarios, which can cause automation to hang indefinitely.
+
+The `--non-interactive` flag ensures that:
+
+- The script will not wait for user confirmation at any point
+- Default values will be used when decisions are needed
+- Error messages will still be displayed for logging purposes
+- The script will exit with appropriate error codes on failure
+
+Example for automated usage:
+
+```bash
+create-subvolume.sh --backup --target-mount /var --subvol-name @var --non-interactive
 ```
 
 # WORKFLOW
