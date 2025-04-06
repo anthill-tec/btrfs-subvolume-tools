@@ -26,6 +26,7 @@ FAILED_FILES=()
 EXCLUDE_PATTERNS=()
 EXCLUDE_FILES=()
 SHOW_EXCLUDED=false
+DEBUG_MODE=false
 
 #
 # Utility functions
@@ -49,18 +50,17 @@ show_help() {
   echo
   echo "Backup options:"
   echo "  --backup-method=METHOD     Specify the method for copying data:"
-  echo "                             tar: Use tar with pv for compression and progress"
-  echo "                                  (requires: tar, pv)"
-  echo "                             parallel: Use GNU parallel for multi-threaded copying"
-  echo "                                  (requires: parallel)"
-  echo "                             (Automatically falls back if dependencies not met)"
+  echo "                             tar: Use tar with progress (default)"
+  echo "                             parallel: Use parallel for multi-threaded copy"
   echo "  --error-handling=MODE      Specify how to handle file copy errors:"
   echo "                             strict: Stop on first error (default)"
   echo "                             continue: Skip problem files and continue"
   echo "  --exclude=PATTERN          Exclude files/directories matching PATTERN"
   echo "                             (can be specified multiple times)"
-  echo "  --exclude-from=FILE        Read exclude patterns from FILE (one pattern per line)"
+  echo "  --exclude-from=FILE        Read exclude patterns from FILE"
+  echo "                             (can be specified multiple times)"
   echo "  --show-excluded            Show interactive UI to review and modify excluded files"
+  echo "  --debug                    Enable debug mode with detailed logging"
   echo
   echo "Examples:"
   echo "  $0 --backup"
@@ -360,6 +360,11 @@ handle_backup() {
   # Pass through show-excluded option
   if [ "$SHOW_EXCLUDED" = true ]; then
     backup_cmd+=" --show-excluded"
+  fi
+  
+  # Pass through debug mode
+  if [ "$DEBUG_MODE" = true ]; then
+    backup_cmd+=" --debug"
   fi
   
   # Execute the backup command
@@ -681,6 +686,11 @@ main() {
     echo -e "  Show Excluded:    ${YELLOW}true${NC}"
   fi
   
+  # Display debug mode if enabled
+  if [ "$DEBUG_MODE" = true ]; then
+    echo -e "  Debug Mode:       ${YELLOW}true${NC}"
+  fi
+  
   echo
   
   # Set up global trap for clean cancellation
@@ -787,6 +797,10 @@ parse_arguments() {
         ;;
       --show-excluded)
         SHOW_EXCLUDED=true
+        shift
+        ;;
+      --debug)
+        DEBUG_MODE=true
         shift
         ;;
       *)

@@ -27,10 +27,17 @@ CP_PID=""
 DEBUG_MODE=false
 DEBUG_LOG=""
 
-# Debug logging function
+# Debug function to log messages when debug mode is enabled
 debug_log() {
-    if [ "$DEBUG_MODE" = true ]; then
-        echo "[DEBUG] $1" >> "$DEBUG_LOG"
+    if [ "$DEBUG_MODE" = "true" ]; then
+        echo "[DEBUG] $1" >&2
+    fi
+}
+
+# More detailed debug function for pattern matching
+debug_pattern_log() {
+    if [ "$DEBUG_MODE" = "true" ]; then
+        echo "[DEBUG PATTERN] $1" >&2
     fi
 }
 
@@ -184,33 +191,130 @@ copy_data() {
     FIND_EXCLUDE_OPTS=""
     if [ "$INTERACTIVE_EXCLUDE_MODE" != "true" ] && [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
         debug_log "Building find exclude options from ${#EXCLUDE_PATTERNS[@]} patterns"
+        
+        # Debug: List all files before applying any exclude patterns
+        if [ "$DEBUG_MODE" = "true" ]; then
+            debug_pattern_log "Files before applying exclude patterns:"
+            find "$source" -type f | while read -r file; do
+                debug_pattern_log "  - $file"
+            done
+        fi
+        
         for pattern in "${EXCLUDE_PATTERNS[@]}"; do
             # Trim any whitespace
             pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
             debug_log "Processing exclude pattern: '$pattern'"
             
             # Handle different pattern types differently
-            if [[ "$pattern" == */ ]]; then
+            if [[ "$pattern" == "**/"* ]]; then
+                # Double-asterisk pattern (matches any level of directories)
+                # Extract the part after **/
+                dir_name="${pattern#**/}"
+                # Remove trailing slash if present
+                dir_name="${dir_name%/}"
+                debug_pattern_log "Double-asterisk pattern: '**/$dir_name'"
+                
+                # For patterns like **/tmp, we need to match exact directory names
+                # We need to be careful to only match exact directory names, not partial matches
+                # For example, **/log should match /log/ and /path/to/log/ but not /login/ or /path/to/login/
+                
+                # Match the directory exactly by ensuring it's a directory path component
+                # This prevents matching files with similar names
+                # Use -path with proper directory path patterns
+                
+                # Only match exact directory names by adding a trailing slash or making it a path component
+                # This ensures we don't match files with similar names (e.g., important.txt when excluding tmp)
+                FIND_EXCLUDE_OPTS+=" -not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
+                
+                # Debug: Show what files would be excluded by this pattern
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    debug_pattern_log "Files that would be excluded by pattern '$pattern':"
+                    find "$source" -path "*/$dir_name" -o -path "*/$dir_name/*" | while read -r file; do
+                        debug_pattern_log "  - $file"
+                    done
+                fi
+            elif [[ "$pattern" == "**/."* ]]; then
+                # Double-asterisk pattern for hidden directories/files
+                dir_name="${pattern#**/}"
+                # Remove trailing slash if present
+                dir_name="${dir_name%/}"
+                debug_pattern_log "Double-asterisk hidden pattern: '**/$dir_name'"
+                
+                # Similar logic for hidden files/directories
+                # Use -path instead of -name for directory patterns
+                # Only match exact directory names by ensuring proper path components
+                FIND_EXCLUDE_OPTS+=" -not -path \"*/$dir_name/\" -not -path \"*/$dir_name/*\""
+            elif [[ "$pattern" == */ ]]; then
                 # Directory pattern with trailing slash
                 dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
                 debug_log "Directory pattern with trailing slash: '$dir_pattern'"
-                FIND_EXCLUDE_OPTS+=" -not -path \"$source/$dir_pattern/*\" -not -path \"$source/$dir_pattern\""
+                
+                # Match exact directory name with trailing slash to ensure it's a directory
+                FIND_EXCLUDE_OPTS+=" -not -path \"$source/$dir_pattern/\" -not -path \"$source/$dir_pattern/*\""
             elif [[ "$pattern" == *"/"* ]]; then
                 # Path pattern (contains slash)
                 debug_log "Path pattern (contains slash): '$pattern'"
-                FIND_EXCLUDE_OPTS+=" -not -path \"$source/$pattern*\""
+                
+                # Match exact path - use -path for patterns with directory separators
+                if [[ "$pattern" == */ ]]; then
+                    # If pattern ends with slash, it's a directory
+                    FIND_EXCLUDE_OPTS+=" -not -path \"$source/$pattern\" -not -path \"$source/$pattern*\""
+                else
+                    # Otherwise it could be a file or directory
+                    FIND_EXCLUDE_OPTS+=" -not -path \"$source/$pattern\""
+                fi
             elif [[ "$pattern" == \*.* ]]; then
                 # File extension pattern (e.g., *.log)
                 ext="${pattern#\*.}"
                 debug_log "File extension pattern: '*.$ext'"
+                
+                # Match files with exact extension
                 FIND_EXCLUDE_OPTS+=" -not -name \"*.$ext\""
+            elif [[ "$pattern" == .* ]]; then
+                # Hidden file/directory pattern (starts with .)
+                debug_log "Hidden file/directory pattern: '$pattern'"
+                
+                # Match exact hidden file/directory name
+                if [[ "$pattern" == */ ]]; then
+                    # If pattern ends with slash, it's a directory
+                    FIND_EXCLUDE_OPTS+=" -not -path \"*/$pattern\" -not -path \"*/$pattern*\""
+                else
+                    # Otherwise it could be a file or directory
+                    # Use -name for file patterns, -path for directory patterns
+                    FIND_EXCLUDE_OPTS+=" -not -name \"$pattern\" -not -path \"*/$pattern/\" -not -path \"*/$pattern/*\""
+                fi
             else
                 # Other patterns
                 debug_log "Other pattern: '$pattern'"
+                
+                # Match exact name
                 FIND_EXCLUDE_OPTS+=" -not -name \"$pattern\""
             fi
         done
         debug_log "Final find exclude options: $FIND_EXCLUDE_OPTS"
+    fi
+    
+    # Debug: Show what files would be excluded by the combined patterns
+    if [ "$DEBUG_MODE" = "true" ]; then
+        debug_pattern_log "Files that would be excluded by the combined patterns:"
+        eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | while read -r file; do
+            debug_pattern_log "  - $file"
+        done
+    fi
+    
+    # Final check to ensure important files are not excluded
+    if [ "$DEBUG_MODE" = "true" ]; then
+        debug_pattern_log "Final find exclude options: $FIND_EXCLUDE_OPTS"
+        debug_pattern_log "Files that will be copied after applying all exclude patterns:"
+        eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | while read -r file; do
+            debug_pattern_log "  - $file"
+        done
+        
+        # Generic debug check for all files
+        debug_pattern_log "Summary of exclude pattern effects:"
+        debug_pattern_log "  Total files in source: $(find \"$source\" -type f | wc -l)"
+        debug_pattern_log "  Files that will be copied: $(eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | wc -l)"
+        debug_pattern_log "  Files that will be excluded: $(( $(find \"$source\" -type f | wc -l) - $(eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" | wc -l) ))"
     fi
     
     case "$ACTUAL_BACKUP_METHOD" in
@@ -270,18 +374,37 @@ copy_data() {
                 # Create a temporary file with the list of files to copy
                 local files_list=$(mktemp)
                 debug_log "Files list: $files_list"
+                
+                # Use standard find command for regular files
                 eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > "$files_list"
+                
                 local total_files=$(wc -l < "$files_list")
                 echo -e "${YELLOW}Copying $total_files files in parallel...${NC}"
+                
+                # Debug: Show the list of files that will be copied
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    debug_pattern_log "Files that will be copied (after applying all exclude patterns):"
+                    cat "$files_list" | while read -r file; do
+                        debug_pattern_log "  - $file"
+                    done
+                fi
                 
                 # First try a simpler approach - process files one by one for better reliability
                 debug_log "Processing files one by one..."
                 while read -r file; do
-                    rel_file="${file#$source}"
-                    debug_log "Copying file: $file to $destination$rel_file"
-                    cp -a --reflink=auto "$file" "$destination$rel_file" 2>>"$error_log" || {
-                        echo "Failed to copy: $file to $destination$rel_file" >> "$error_log"
-                        debug_log "Failed to copy: $file to $destination$rel_file"
+                    rel_file="${file#$source/}"
+                    
+                    # Create parent directory if it doesn't exist
+                    parent_dir="$(dirname "$destination/$rel_file")"
+                    if [ ! -d "$parent_dir" ]; then
+                        debug_log "Creating parent directory: $parent_dir"
+                        mkdir -p "$parent_dir"
+                    fi
+                    
+                    debug_log "Copying $file to $destination/$rel_file"
+                    cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || {
+                        debug_log "Failed to copy: $file to $destination/$rel_file"
+                        FAILED_FILES+=("$file")
                     }
                 done < "$files_list"
                 
@@ -333,18 +456,37 @@ copy_data() {
                 # Create a temporary file with the list of files to copy
                 local files_list=$(mktemp)
                 debug_log "Files list: $files_list"
+                
+                # Use standard find command for regular files
                 eval "find \"$source\" -type f $FIND_EXCLUDE_OPTS" > "$files_list"
+                
                 local total_files=$(wc -l < "$files_list")
                 echo -e "${YELLOW}Copying $total_files files...${NC}"
+                
+                # Debug: Show the list of files that will be copied
+                if [ "$DEBUG_MODE" = "true" ]; then
+                    debug_pattern_log "Files that will be copied (after applying all exclude patterns):"
+                    cat "$files_list" | while read -r file; do
+                        debug_pattern_log "  - $file"
+                    done
+                fi
                 
                 # Process files one by one for better reliability
                 debug_log "Processing files one by one..."
                 while read -r file; do
-                    rel_file="${file#$source}"
-                    debug_log "Copying file: $file to $destination$rel_file"
-                    cp -a --reflink=auto "$file" "$destination$rel_file" || {
-                        echo -e "${RED}Failed to copy: $file to $destination$rel_file${NC}"
-                        debug_log "Failed to copy: $file to $destination$rel_file"
+                    rel_file="${file#$source/}"
+                    
+                    # Create parent directory if it doesn't exist
+                    parent_dir="$(dirname "$destination/$rel_file")"
+                    if [ ! -d "$parent_dir" ]; then
+                        debug_log "Creating parent directory: $parent_dir"
+                        mkdir -p "$parent_dir"
+                    fi
+                    
+                    debug_log "Copying $file to $destination/$rel_file"
+                    cp -a --reflink=auto "$file" "$destination/$rel_file" || {
+                        echo -e "${RED}Failed to copy: $file to $destination/$rel_file${NC}"
+                        debug_log "Failed to copy: $file to $destination/$rel_file"
                         rm -f "$files_list"
                         return 1
                     }
@@ -387,8 +529,24 @@ copy_data() {
                     total_files=$(wc -l < /tmp/files_to_copy.txt)
                     echo -e "${YELLOW}Copying $total_files files...${NC}"
                     
+                    # Debug: Show the list of files that will be copied
+                    if [ "$DEBUG_MODE" = "true" ]; then
+                        debug_pattern_log "Files that will be copied (after applying all exclude patterns):"
+                        cat /tmp/files_to_copy.txt | while read -r file; do
+                            debug_pattern_log "  - $file"
+                        done
+                    fi
+                    
                     cat /tmp/files_to_copy.txt | while read -r file; do
                         rel_file="${file#$source/}"
+                        
+                        # Create parent directory if it doesn't exist
+                        parent_dir="$(dirname "$destination/$rel_file")"
+                        if [ ! -d "$parent_dir" ]; then
+                            debug_log "Creating parent directory: $parent_dir"
+                            mkdir -p "$parent_dir"
+                        fi
+                        
                         cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || true
                     done
                     
@@ -432,8 +590,24 @@ copy_data() {
                     total_files=$(wc -l < /tmp/files_to_copy.txt)
                     echo -e "${YELLOW}Copying $total_files files...${NC}"
                     
+                    # Debug: Show the list of files that will be copied
+                    if [ "$DEBUG_MODE" = "true" ]; then
+                        debug_pattern_log "Files that will be copied (after applying all exclude patterns):"
+                        cat /tmp/files_to_copy.txt | while read -r file; do
+                            debug_pattern_log "  - $file"
+                        done
+                    fi
+                    
                     cat /tmp/files_to_copy.txt | while read -r file; do
                         rel_file="${file#$source/}"
+                        
+                        # Create parent directory if it doesn't exist
+                        parent_dir="$(dirname "$destination/$rel_file")"
+                        if [ ! -d "$parent_dir" ]; then
+                            debug_log "Creating parent directory: $parent_dir"
+                            mkdir -p "$parent_dir"
+                        fi
+                        
                         cp -a --reflink=auto "$file" "$destination/$rel_file" || {
                             echo -e "${RED}Failed to copy file: $file${NC}"
                             rm /tmp/files_to_copy.txt
@@ -478,8 +652,24 @@ copy_data() {
                     total_files=$(wc -l < /tmp/files_to_copy.txt)
                     echo -e "${YELLOW}Copying $total_files files...${NC}"
                     
+                    # Debug: Show the list of files that will be copied
+                    if [ "$DEBUG_MODE" = "true" ]; then
+                        debug_pattern_log "Files that will be copied (after applying all exclude patterns):"
+                        cat /tmp/files_to_copy.txt | while read -r file; do
+                            debug_pattern_log "  - $file"
+                        done
+                    fi
+                    
                     cat /tmp/files_to_copy.txt | while read -r file; do
                         rel_file="${file#$source/}"
+                        
+                        # Create parent directory if it doesn't exist
+                        parent_dir="$(dirname "$destination/$rel_file")"
+                        if [ ! -d "$parent_dir" ]; then
+                            debug_log "Creating parent directory: $parent_dir"
+                            mkdir -p "$parent_dir"
+                        fi
+                        
                         cp -a --reflink=auto "$file" "$destination/$rel_file" 2>>"$error_log" || true
                     done
                     
@@ -510,10 +700,7 @@ copy_data() {
                     eval "find \"$source\" -type d $FIND_EXCLUDE_OPTS" | while read -r dir; do
                         rel_dir="${dir#$source}"
                         if [ -n "$rel_dir" ]; then
-                            mkdir -p "$destination/$rel_dir" || {
-                                echo -e "${RED}Failed to create directory: $destination/$rel_dir${NC}"
-                                return 1
-                            }
+                            mkdir -p "$destination/$rel_dir"
                         fi
                     done
                     
@@ -522,8 +709,24 @@ copy_data() {
                     total_files=$(wc -l < /tmp/files_to_copy.txt)
                     echo -e "${YELLOW}Copying $total_files files...${NC}"
                     
+                    # Debug: Show the list of files that will be copied
+                    if [ "$DEBUG_MODE" = "true" ]; then
+                        debug_pattern_log "Files that will be copied (after applying all exclude patterns):"
+                        cat /tmp/files_to_copy.txt | while read -r file; do
+                            debug_pattern_log "  - $file"
+                        done
+                    fi
+                    
                     cat /tmp/files_to_copy.txt | while read -r file; do
                         rel_file="${file#$source/}"
+                        
+                        # Create parent directory if it doesn't exist
+                        parent_dir="$(dirname "$destination/$rel_file")"
+                        if [ ! -d "$parent_dir" ]; then
+                            debug_log "Creating parent directory: $parent_dir"
+                            mkdir -p "$parent_dir"
+                        fi
+                        
                         cp -a --reflink=auto "$file" "$destination/$rel_file" || {
                             echo -e "${RED}Failed to copy file: $file${NC}"
                             rm /tmp/files_to_copy.txt
@@ -623,14 +826,22 @@ preview_excluded_files() {
     local first=true
     
     for pattern in "${EXCLUDE_PATTERNS[@]}"; do
-      if [[ "$pattern" == *"/"* ]]; then
-        # Directory pattern (contains slash)
-        dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash if present
+      if [[ "$pattern" == */ ]]; then
+        # Directory pattern with trailing slash
+        dir_pattern=$(echo "$pattern" | sed 's|/$||') # Remove trailing slash
         if [ "$first" = true ]; then
           find_cmd+=" -path \"*/$dir_pattern/*\" -o -path \"*/$dir_pattern\""
           first=false
         else
           find_cmd+=" -o -path \"*/$dir_pattern/*\" -o -path \"*/$dir_pattern\""
+        fi
+      elif [[ "$pattern" == *"/"* ]]; then
+        # Path pattern (contains slash)
+        if [ "$first" = true ]; then
+          find_cmd+=" -path \"$pattern*\""
+          first=false
+        else
+          find_cmd+=" -o -path \"$pattern*\""
         fi
       elif [[ "$pattern" == \*.* ]]; then
         # File extension pattern (e.g., *.log)
@@ -1122,7 +1333,7 @@ interactive_exclude_selection() {
   for dir in "${!excluded_dirs[@]}"; do
     if [ ${excluded_dirs["$dir"]} -eq 1 ]; then
       rel_dir="${dir#$SOURCE_DIR/}"
-      FIND_EXCLUDE_OPTS+=" -not -path \"$dir/*\" -not -path \"$dir\""
+      FIND_EXCLUDE_OPTS+=" -not -wholename \"$dir/*\" -not -wholename \"$dir\""
       TAR_EXCLUDE_OPTS+=" --exclude='$rel_dir'"
     fi
   done
@@ -1131,7 +1342,7 @@ interactive_exclude_selection() {
   for file in "${!excluded_files[@]}"; do
     if [ ${excluded_files["$file"]} -eq 1 ]; then
       rel_file="${file#$SOURCE_DIR/}"
-      FIND_EXCLUDE_OPTS+=" -not -path \"$file\""
+      FIND_EXCLUDE_OPTS+=" -not -wholename \"$file\""
       TAR_EXCLUDE_OPTS+=" --exclude='$rel_file'"
     fi
   done
