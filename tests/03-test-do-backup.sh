@@ -403,7 +403,7 @@ test_basic_tar_backup() {
     
     # Run the backup script with default tar method
     logInfo "Running backup with default tar method"
-    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\""
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --non-interactive"
     
     # Verify backup integrity
     verify_backup "$SOURCE_MOUNT" "$DESTINATION_MOUNT" 0
@@ -423,7 +423,7 @@ test_parallel_backup() {
     
     # Run the backup script with parallel method
     logInfo "Running backup with parallel method"
-    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --method=parallel"
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --method=parallel --non-interactive"
     
     # Verify backup integrity
     verify_backup "$SOURCE_MOUNT" "$DESTINATION_MOUNT" 0
@@ -445,7 +445,7 @@ test_continue_on_error() {
     # Run the backup script with continue-on-error mode
     logInfo "Running backup with continue-on-error mode"
     local output
-    output=$($SCRIPT_PATH --source "$SOURCE_MOUNT" --destination "$DESTINATION_MOUNT" --error-handling=continue 2>&1)
+    output=$($SCRIPT_PATH --source "$SOURCE_MOUNT" --destination "$DESTINATION_MOUNT" --error-handling=continue --non-interactive 2>&1)
     local exit_code=$?
     
     # Note: The script might not return exit code 2 as expected, so we don't assert on it
@@ -513,7 +513,7 @@ test_special_files() {
     
     # Run the backup script
     logInfo "Running backup with special files"
-    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\""
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --non-interactive"
     
     # Verify backup integrity
     verify_backup "$SOURCE_MOUNT" "$DESTINATION_MOUNT" 0
@@ -544,7 +544,7 @@ test_large_files() {
     
     # Run the backup script
     logInfo "Running backup with large files"
-    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\""
+    assertCmd "$SCRIPT_PATH --source \"$SOURCE_MOUNT\" --destination \"$DESTINATION_MOUNT\" --non-interactive"
     
     # Verify backup integrity
     verify_backup "$SOURCE_MOUNT" "$DESTINATION_MOUNT" 0
@@ -732,7 +732,7 @@ EOF
     # Run the backup with show-excluded option
     logInfo "Running backup with show-excluded option"
     $SCRIPT_PATH --source "$SOURCE_MOUNT" --destination "$DESTINATION_MOUNT" \
-        --exclude='*.log' --exclude='*.tmp' --exclude='cache/' --show-excluded
+        --exclude='*.log' --exclude='*.tmp' --exclude='cache/' --show-excluded --non-interactive
     
     local status=$?
     assert "[ $status -eq 0 ]" "Backup with show-excluded option should succeed"

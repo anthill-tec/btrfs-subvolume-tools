@@ -25,7 +25,7 @@ PASSED_ASSERTIONS=0
 FAILED_ASSERTIONS=0
 
 # Keep track of failed assertions
-declare -a FAILED_ASSERTIONS=()
+declare -A FAILED_ASSERTIONS_BY_TEST=()
 CURRENT_TEST=""
 
 # Initialize test logging - called at the beginning of each test
@@ -37,6 +37,9 @@ test_init() {
     ASSERTIONS=0
     PASSED_ASSERTIONS=0
     FAILED_ASSERTIONS=0
+    
+    # Reset the failed assertions list for this test
+    FAILED_ASSERTIONS_BY_TEST["$CURRENT_TEST"]=""
     
     # Output test header
     if [ "$DEBUG" = "true" ]; then
@@ -148,8 +151,15 @@ assert() {
         FAILED_ASSERTIONS=$((FAILED_ASSERTIONS + 1))
         echo -e "  ${RED}✗ ASSERT FAILED:${NC} $message"
         
-        # Add to failed assertions list
-        FAILED_ASSERTIONS+=("$CURRENT_TEST: $message")
+        # Add to failed assertions list for this test
+        if [ -n "$CURRENT_TEST" ]; then
+            if [ -z "${FAILED_ASSERTIONS_BY_TEST[$CURRENT_TEST]}" ]; then
+                FAILED_ASSERTIONS_BY_TEST["$CURRENT_TEST"]="$message"
+            else
+                FAILED_ASSERTIONS_BY_TEST["$CURRENT_TEST"]="${FAILED_ASSERTIONS_BY_TEST[$CURRENT_TEST]}
+$message"
+            fi
+        fi
     fi
     
     return $result
@@ -212,6 +222,15 @@ test_finish() {
     else
         FAILED_TESTS=$((FAILED_TESTS + 1))
         echo -e "${RED}✗ TEST FAILED:${NC} $test_name ($FAILED_ASSERTIONS/$ASSERTIONS assertions failed)"
+        
+        # Show failed assertions for this test only
+        if [ -n "${FAILED_ASSERTIONS_BY_TEST[$test_name]}" ]; then
+            echo -e "${RED}Failed assertions:${NC}"
+            echo "${FAILED_ASSERTIONS_BY_TEST[$test_name]}" | while IFS= read -r line; do
+                echo -e "  ${RED}✗${NC} $line"
+            done
+        fi
+        
         return 1
     fi
 }
@@ -219,12 +238,39 @@ test_finish() {
 # Print summary of test results
 print_test_summary() {
     # Show failed assertions if any
-    if [ ${#FAILED_ASSERTIONS[@]} -gt 0 ]; then
-        echo -e "${RED}Failed assertions:${NC}"
-        for ((i=0; i<${#FAILED_ASSERTIONS[@]}; i++)); do
-            echo -e "  ${RED}✗${NC} ${FAILED_ASSERTIONS[$i]}"
+    local any_failures=0
+    
+    # Only show failures for the current test if specified
+    if [ -n "$SPECIFIC_TEST_CASE" ]; then
+        if [ -n "${FAILED_ASSERTIONS_BY_TEST[$SPECIFIC_TEST_CASE]}" ]; then
+            any_failures=1
+            echo -e "${RED}Failed assertions:${NC}"
+            echo "${FAILED_ASSERTIONS_BY_TEST[$SPECIFIC_TEST_CASE]}" | while IFS= read -r line; do
+                echo -e "  ${RED}✗${NC} $line"
+            done
+            echo ""
+        fi
+    else
+        # Check if there are any failures in any test
+        for test_name in "${!FAILED_ASSERTIONS_BY_TEST[@]}"; do
+            if [ -n "${FAILED_ASSERTIONS_BY_TEST[$test_name]}" ]; then
+                any_failures=1
+                break
+            fi
         done
-        echo ""
+        
+        if [ $any_failures -eq 1 ]; then
+            echo -e "${RED}Failed assertions:${NC}"
+            for test_name in "${!FAILED_ASSERTIONS_BY_TEST[@]}"; do
+                if [ -n "${FAILED_ASSERTIONS_BY_TEST[$test_name]}" ]; then
+                    echo -e "  ${RED}Test: $test_name${NC}"
+                    echo "${FAILED_ASSERTIONS_BY_TEST[$test_name]}" | while IFS= read -r line; do
+                        echo -e "    ${RED}✗${NC} $line"
+                    done
+                fi
+            done
+            echo ""
+        fi
     fi
     
     # Always show the test summary banner
@@ -262,6 +308,9 @@ process_test_file() {
     local FILE_NAME=$(basename "$TEST_FILE" .sh)
     
     echo -e "${BLUE}Test File: $FILE_NAME${NC}"
+    
+    # Reset the failed assertions array before processing this test file
+    FAILED_ASSERTIONS_BY_TEST=()
     
     # Source the test file to access its functions
     source "$TEST_FILE"

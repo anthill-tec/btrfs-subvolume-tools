@@ -40,11 +40,11 @@ if [ -f "$SCRIPT_DIR/test-utils.sh" ]; then
         }
     fi
     
-    if ! command -v test_finish >/dev/null 2>&1; then
+    if ! type "test_finish" &>/dev/null; then
         echo -e "${YELLOW}Warning: test_finish function not found, defining fallback${NC}"
         test_finish() {
             # Print test results
-            if [ "$FAILED_ASSERTIONS" -eq 0 ]; then
+            if [ -z "${FAILED_ASSERTIONS_BY_TEST[$CURRENT_TEST]}" ]; then
                 echo -e "${GREEN}✓ TEST PASSED: $CURRENT_TEST${NC}"
                 return 0
             else
@@ -180,6 +180,9 @@ if [ -n "$SPECIFIC_TEST_CASE" ]; then
             # Source the test file to access its functions
             source "$TEST_FILE"
             
+            # Reset the failed assertions array before running the specific test case
+            FAILED_ASSERTIONS_BY_TEST=()
+            
             # Check if the specified test case exists in this file (with or without test_ prefix)
             if type "$FULL_TEST_CASE_NAME" &>/dev/null || type "$SPECIFIC_TEST_CASE" &>/dev/null; then
                 # Determine which function name exists
@@ -232,6 +235,9 @@ if [ -n "$SPECIFIC_TEST_CASE" ]; then
             
             # Source the test file to access its functions
             source "$TEST_FILE"
+            
+            # Reset the failed assertions array before running the specific test case
+            FAILED_ASSERTIONS_BY_TEST=()
             
             # Check if the specified test case exists in this file (with or without test_ prefix)
             if type "$FULL_TEST_CASE_NAME" &>/dev/null || type "$SPECIFIC_TEST_CASE" &>/dev/null; then
