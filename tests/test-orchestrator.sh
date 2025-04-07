@@ -249,6 +249,15 @@ run_tests() {
     run_cmd 2 "Copying bin scripts to container" "mkdir -p $SCRIPT_DIR/container/rootfs/root/bin"
     run_cmd 2 "Copying scripts" "cp -rv $PARENT_DIR/bin/* $SCRIPT_DIR/container/rootfs/root/bin/"
     
+    # Copy share directory to container if it exists
+    if [ -d "$PARENT_DIR/share" ]; then
+        run_cmd 2 "Creating share directory structure" "mkdir -p $SCRIPT_DIR/container/rootfs/root/share/btrfs-subvolume-tools/lib"
+        run_cmd 2 "Copying share directory content" "cp -rv $PARENT_DIR/share/* $SCRIPT_DIR/container/rootfs/root/share/"
+        log_phase 2 "Share directory copied successfully"
+    else
+        log_phase 2 "WARNING: Share directory not found at $PARENT_DIR/share - module loading may fail"
+    fi
+    
     # Copy test scripts and utilities
     run_cmd 2 "Copying test runner" "cp -v $SCRIPT_DIR/test-runner.sh $SCRIPT_DIR/container/rootfs/root/test-runner.sh && chmod +x $SCRIPT_DIR/container/rootfs/root/test-runner.sh"
     run_cmd 2 "Copying test utilities" "cp -v $SCRIPT_DIR/test-utils.sh $SCRIPT_DIR/container/rootfs/root/test-utils.sh"
