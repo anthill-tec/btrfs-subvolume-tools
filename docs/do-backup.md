@@ -70,27 +70,43 @@ The script supports several types of exclusion patterns:
 * **Double-asterisk patterns** (`**/pattern` or `pattern/**`):
   * `**/pattern` matches files/directories with the name "pattern" at any level in the directory tree
   * `pattern/**` matches all files and directories under a directory named "pattern"
+  * Example: `**/node_modules` excludes all "node_modules" directories anywhere in the tree
   * Example: `dist/**` excludes the entire `dist` directory and all its contents
+
+* **File extension patterns** (`*.ext`):
+  * Matches files with the specified extension
+  * Example: `*.tmp` excludes all files with the ".tmp" extension
+  * Note: File extension patterns only match files, not directories
+
+* **Directory patterns with trailing slashes** (`dir/`):
+  * Specifically matches directories (not files) with the given name
+  * Example: `cache/` excludes directories named "cache" but not files named "cache"
+  * All contents of matched directories are automatically excluded
+
+* **Path patterns with slashes** (`dir/file`):
+  * Patterns containing slashes are matched against the full path relative to the source directory
+  * Example: `logs/debug.log` only excludes "debug.log" in the "logs" directory
+  * These are treated as exact path matches when they don't contain wildcards
 
 * **Hidden file/directory patterns** (`.pattern`):
   * Matches hidden files or directories starting with a dot
   * Example: `.git` excludes all files/directories named ".git"
 
-* **Directory patterns with trailing slashes** (`dir/`):
-  * Specifically matches directories (not files) with the given name
-  * Example: `cache/` excludes directories named "cache" but not files named "cache"
-
-* **Path patterns with slashes** (`dir/file`):
-  * Patterns containing slashes are matched against the full path relative to the source directory
-  * Example: `logs/debug.log` only excludes "debug.log" in the "logs" directory
-
-* **File extension patterns** (`*.ext`):
-  * Matches files with the specified extension
-  * Example: `*.tmp` excludes all files with the ".tmp" extension
-
 * **Regular patterns** (anything else):
   * Matches files or directories by name anywhere in the directory tree
   * Example: `node_modules` excludes all files and directories named "node_modules"
+
+### Pattern Precedence
+
+When multiple patterns match the same file or directory, the most specific pattern takes precedence. The specificity ranking (from most to least specific) is:
+
+1. Exact path patterns (`dir/file` without wildcards)
+2. Directory patterns with trailing slashes (`dir/`)
+3. Double-asterisk patterns (`**/pattern` or `pattern/**`)
+4. File extension patterns (`*.ext`)
+5. Regular patterns (simple name matching)
+
+This precedence system ensures that more targeted exclusions take priority over broader patterns, giving you fine-grained control over what gets excluded from your backup.
 
 ### Pattern Behavior
 
@@ -100,6 +116,7 @@ The script supports several types of exclusion patterns:
 * Empty lines in exclude files are ignored
 * When a directory is excluded, all its contents are also excluded
 * Patterns are case-sensitive on Unix/Linux systems
+* Duplicate exclusions are automatically deduplicated based on pattern specificity
 
 ### Interactive Exclude Selection
 
@@ -195,13 +212,18 @@ do-backup.sh -s /home/user -d /mnt/backup/home --exclude-from=exclude_patterns.t
 
 # Interactively select which files and directories to exclude
 do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='tmp/' --show-excluded
+```
 
-# Example exclude_patterns.txt file content:
-# *.log
-# *.tmp
-# cache/
-# node_modules/
-# .git/
+Example exclude_patterns.txt file content:
+
+```text
+# This is a comment
+*.log
+*.tmp
+node_modules/
+.git/
+build/
+dist/**
 ```
 
 #### More Comprehensive Examples
@@ -234,7 +256,7 @@ do-backup.sh -s /home/user/project -d /mnt/backup/project \
 
 #### Example exclude_patterns.txt for a Development Project
 
-```
+```text
 # Temporary files
 *.tmp
 *.temp
@@ -296,93 +318,129 @@ yarn-error.log*
 
 If you see "Warning: Exclude file not found" errors:
 
+
 1. **Check file path and permissions**:
+
+
    ```bash
    ls -la /path/to/your/exclude/file
    ```
 
+
 2. **When using sudo**:
    * The tilde (`~`) in paths refers to root's home directory, not your user's
    * Use `$HOME` variable or absolute paths instead:
+
+
    ```bash
    sudo do-backup.sh --exclude-from=$HOME/.backupIgnore
    # or
    sudo do-backup.sh --exclude-from=/home/username/.backupIgnore
    ```
 
+
 3. **Avoid quotes around paths with tilde**:
    * Correct: `--exclude-from=~/.backupIgnore`
    * Incorrect: `--exclude-from='~/.backupIgnore'`
+
 
 ##### Dialog Not Showing
 
 If the interactive exclude selection dialog doesn't appear:
 
+
 1. **Verify dialog is installed**:
+
+
    ```bash
    # For Arch Linux
    pacman -Q dialog
    ```
 
+
 2. **Environment issues with sudo**:
    * When running with sudo, the dialog may fail to display due to environment variables
    * Try using `sudo -E` to preserve your environment variables:
+
+
    ```bash
    sudo -E create-subvolume [other options]
    ```
-   
+
+
 3. **Terminal type issues**:
    * Set the TERM environment variable explicitly:
+
+
    ```bash
    TERM=xterm sudo create-subvolume [other options]
    ```
 
+
 4. **X11 forwarding issues**:
    * If running over SSH, ensure X11 forwarding is enabled
    * Try using a text-based dialog alternative by setting:
+
+
    ```bash
    export DIALOGRC=/path/to/dialogrc
    ```
 
+
 ##### Pattern Matching Issues
 
 If the script reports "Analysis complete. Found X directories and Y files matching patterns" but then shows "No matches found for pattern":
+
 
 1. **Check for path relativity issues**:
    * The script may be using absolute paths internally but comparing with relative paths
    * Try patterns without leading slashes
    * For debugging, you can add a simple pattern that you know exists (like a specific filename)
 
+
 2. **Large number of matches**:
    * If there are too many matches (thousands of files), the dialog may fail to display
    * Try with a more specific pattern that matches fewer files
+
 
 ## BACKUP METHODS
 
 The script supports several backup methods, automatically selecting the best available based on installed tools:
 
+
 1. **tar** - Uses tar with pv for compression and progress tracking. This method is efficient for backing up large directories with many small files.
+
 
 2. **parallel** - Uses GNU parallel for multi-threaded copying, which can significantly improve performance on systems with multiple CPU cores.
 
+
 3. **cp-progress** - Falls back to this method if tar/pv is not available. Uses the 'progress' tool to show copy progress.
 
+
 4. **cp-plain** - The simplest fallback method, uses standard cp command without progress indication.
+
 
 ## ERROR HANDLING
 
 The script provides two error handling modes:
 
+
 1. **strict** (default) - Stops on the first error encountered during backup.
 
+
 2. **continue** - Skips problem files and continues with the backup. At the end, it provides a summary of failed files.
+
 
 ## INTERRUPTION HANDLING
 
 The script handles user interruptions (Ctrl+C) gracefully:
 
+
 1. In interactive mode, it asks if you want to continue despite the interruption.
+
+
 2. In non-interactive mode, it cleanly terminates the backup operation.
+
 
 ## EXIT CODES
 
@@ -390,45 +448,59 @@ The script handles user interruptions (Ctrl+C) gracefully:
 * `1` - Error occurred (invalid arguments, source/destination issues, etc.)
 * `2` - Backup completed but some files could not be copied (only in 'continue' error handling mode)
 
+
 ## EXAMPLES
 
 * Basic backup:
+
 
   ```bash
   do-backup.sh --source /home/user --destination /mnt/backup/home
   ```
 
+
 * Using parallel backup method:
+
 
   ```bash
   do-backup.sh -s /var -d /mnt/backup/var --method=parallel
   ```
 
+
 * Continue on errors:
+
 
   ```bash
   do-backup.sh -s /home/user -d /mnt/backup/home --error-handling=continue
   ```
 
+
 * Exclude specific file types:
+
 
   ```bash
   do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='*.tmp'
   ```
 
+
 * Exclude multiple directories:
+
 
   ```bash
   do-backup.sh -s /home/user -d /mnt/backup/home --exclude='tmp/' --exclude='cache/' --exclude='.git/'
   ```
 
+
 * Exclude specific paths:
+
 
   ```bash
   do-backup.sh -s /home/user -d /mnt/backup/home --exclude='Downloads/large-files/' --exclude='Videos/'
   ```
 
+
 * Using an exclude file:
+
 
   ```bash
   # First create an exclude file
@@ -446,47 +518,61 @@ The script handles user interruptions (Ctrl+C) gracefully:
   do-backup.sh -s /home/user/projects -d /mnt/backup/projects --exclude-from=exclude_patterns.txt
   ```
 
+
 * Combining exclude options:
+
 
   ```bash
   do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.iso' --exclude-from=exclude_patterns.txt
   ```
 
+
 * Non-interactive backup with excludes:
+
 
   ```bash
   do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --non-interactive
   ```
 
+
 ## AUTOMATED USAGE
 
 When using this script in automated environments, testing frameworks, or any non-interactive context, always use the `--non-interactive` flag. This is critical because without this flag, the script will prompt for user input in certain scenarios, which can cause automation to hang indefinitely.
 
+
 The `--non-interactive` flag ensures that:
+
 
 * The script will not wait for user confirmation at any point
 * Default values will be used when decisions are needed
 * Error messages will still be displayed for logging purposes
 * The script will exit with appropriate error codes on failure
 
+
 Scenarios where the script might prompt for input without this flag:
+
 
 * Empty source directory detection
 * Confirmation of exclude patterns
 * Handling of special files
 * Error recovery options
 
+
 Example for automated usage in a testing environment:
+
 
 ```bash
 do-backup.sh -s /home/user -d /mnt/backup/home --exclude='*.log' --exclude='cache/' --non-interactive
 ```
 
+
 Example for automated usage in a scheduled backup script:
+
 
 ```bash
 do-backup.sh -s /var/www -d /mnt/backup/www --method=tar --error-handling=continue --non-interactive
 ```
+
 
 ## NOTES
 
@@ -495,10 +581,12 @@ do-backup.sh -s /var/www -d /mnt/backup/www --method=tar --error-handling=contin
 * The script uses reflink copies when possible (on BTRFS filesystems) for efficiency.
 * Empty source directories are handled gracefully, with a confirmation prompt in interactive mode.
 
+
 ## SEE ALSO
 
 * `create-subvolume` - Creates BTRFS subvolumes with optional backup
 * `configure-snapshots` - Configures BTRFS snapshot schedules
+
 
 ## AUTHOR
 
