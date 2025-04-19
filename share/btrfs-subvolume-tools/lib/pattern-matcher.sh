@@ -23,10 +23,10 @@ _pattern_debug() {
 pattern_classify() {
     local pattern="$1"
     
-    if [[ "$pattern" == */* && "$pattern" != *"*"* ]]; then
-        echo "exact_path"
-    elif [[ "$pattern" == */ ]]; then
+    if [[ "$pattern" == */ ]]; then
         echo "directory_with_trailing_slash"
+    elif [[ "$pattern" == */* && "$pattern" != *"*"* ]]; then
+        echo "exact_path"
     elif [[ "$pattern" == **/* ]]; then
         echo "double_asterisk"
     elif [[ "$pattern" == *.*  && "$pattern" != */* ]]; then
@@ -303,7 +303,7 @@ _build_compatibility_arrays() {
         if [[ -f "$file" ]]; then
             _EXCLUDED_FILES+=("$file")
         elif [[ -d "$file" ]]; then
-            _EXCLUDED_DIRS+=("$dir")
+            _EXCLUDED_DIRS+=("$file")
         fi
     done
     
@@ -376,27 +376,214 @@ pattern_get_dirs_by_pattern() {
     fi
 }
 
+# Create a progress indicator function for searches
+show_progress() {
+    local pid=$1
+    local spin='-\|/'
+    local i=0
+    echo -n "  Searching... "
+    while kill -0 $pid 2>/dev/null; do
+        i=$(( (i+1) % 4 ))
+        printf "\r  Searching... %c " "${spin:$i:1}"
+        sleep 0.2
+    done
+    printf "\r  Search completed!      \n"
+}
+
+# Process a pattern and add matching files/directories to the exclusion lists
+# Usage: _process_pattern <source_dir> <pattern>
+_process_pattern() {
+    local source_dir="$1"
+    local pattern="$2"
+    
+    # Skip empty patterns
+    if [[ -z "$pattern" ]]; then
+        return
+    fi
+    
+    # Get the pattern type
+    local pattern_type=$(pattern_classify "$pattern")
+    local pattern_rank=$(pattern_get_rank "$pattern_type")
+    
+    # Add the pattern to the list
+    _pattern_debug "Added pattern: $pattern (type: $pattern_type, rank: $pattern_rank)"
+    
+    # Process the pattern based on its type
+    if [[ "$pattern" == */* && "$pattern" != *"*"* ]]; then
+        # Exact path pattern
+        echo "  Exact path pattern: '$pattern'"
+        
+        # Check if the file exists
+        if [[ -f "$source_dir/$pattern" ]]; then
+            # Add to excluded files
+            EXCLUDED_FILES+=("$source_dir/$pattern")
+            PATTERN_FILES["$pattern"]+=" $source_dir/$pattern"
+            
+            # Add to EXCLUDED_PATTERN_MATCHES for copy_data
+            EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "$source_dir/$pattern")
+        elif [[ -d "$source_dir/$pattern" ]]; then
+            # Add to excluded directories
+            EXCLUDED_DIRS+=("$source_dir/$pattern")
+            PATTERN_DIRS["$pattern"]+=" $source_dir/$pattern"
+            
+            # Also find and exclude all files within this directory
+            while IFS= read -r file; do
+                EXCLUDED_FILES+=("$file")
+                PATTERN_FILES["$pattern"]+=" $file"
+            done < <(find "$source_dir/$pattern" -type f 2>/dev/null)
+            
+            # Add to EXCLUDED_PATTERN_MATCHES for copy_data
+            EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "$source_dir/$pattern" "-not" "-path" "$source_dir/$pattern/*")
+        fi
+    elif [[ "$pattern" == */ ]]; then
+        # Directory pattern with trailing slash
+        # Remove the trailing slash
+        dir_pattern="${pattern%/}"
+        echo "  Directory pattern with trailing slash: '$dir_pattern/'"
+        
+        # Check if the directory exists
+        if [[ -d "$source_dir/$dir_pattern" ]]; then
+            # Add to excluded directories (without trailing slash)
+            EXCLUDED_DIRS+=("$source_dir/$dir_pattern")
+            PATTERN_DIRS["$pattern"]+=" $source_dir/$dir_pattern"
+            
+            # Also find and exclude all files within this directory
+            while IFS= read -r file; do
+                EXCLUDED_FILES+=("$file")
+                PATTERN_FILES["$pattern"]+=" $file"
+            done < <(find "$source_dir/$dir_pattern" -type f 2>/dev/null)
+            
+            # Add to EXCLUDED_PATTERN_MATCHES for copy_data
+            EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "$source_dir/$dir_pattern" "-not" "-path" "$source_dir/$dir_pattern/*")
+        fi
+    elif [[ "$pattern" == *.* && "$pattern" != */* ]]; then
+        # File extension pattern
+        echo "  File extension pattern: '$pattern'"
+        
+        # Extract the extension
+        local extension="${pattern#*.}"
+        
+        # Find all files with that extension
+        local temp_file=$(mktemp)
+        (find "$source_dir" -type f -name "*.$extension" 2>/dev/null > "$temp_file") &
+        local find_pid=$!
+        show_progress $find_pid
+        wait $find_pid
+        
+        # Process the results
+        while IFS= read -r file; do
+            EXCLUDED_FILES+=("$file")
+            PATTERN_FILES["$pattern"]+=" $file"
+        done < "$temp_file"
+        
+        # Clean up
+        rm -f "$temp_file"
+        
+        # Add to EXCLUDED_PATTERN_MATCHES for copy_data
+        EXCLUDED_PATTERN_MATCHES+=("-not" "-name" "*.$extension")
+    elif [[ "$pattern" == **/* ]]; then
+        # Double-asterisk pattern
+        echo "  Double-asterisk pattern: '$pattern'"
+        
+        # Extract the pattern after the double asterisk
+        local path_pattern="${pattern#**/}"
+        
+        # Find all directories matching the pattern
+        local temp_file=$(mktemp)
+        (find "$source_dir" -type d -path "*/$path_pattern*" 2>/dev/null > "$temp_file") &
+        local find_pid=$!
+        show_progress $find_pid
+        wait $find_pid
+        
+        # Process the directory results
+        while IFS= read -r dir; do
+            EXCLUDED_DIRS+=("$dir")
+            PATTERN_DIRS["$pattern"]+=" $dir"
+            
+            # Also find and exclude all files within these directories
+            local temp_file2=$(mktemp)
+            find "$dir" -type f 2>/dev/null > "$temp_file2"
+            
+            while IFS= read -r file; do
+                EXCLUDED_FILES+=("$file")
+                PATTERN_FILES["$pattern"]+=" $file"
+            done < "$temp_file2"
+            
+            rm -f "$temp_file2"
+        done < "$temp_file"
+        
+        # Clean up
+        rm -f "$temp_file"
+        
+        # Add to EXCLUDED_PATTERN_MATCHES for copy_data
+        EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "*/$path_pattern*" "-not" "-path" "*/$path_pattern*/*")
+    else
+        # Regular pattern
+        echo "  Regular pattern: '$pattern'"
+        
+        # Check if it's a directory name pattern
+        if [[ -d "$source_dir/$pattern" ]]; then
+            echo "  Directory name pattern: '$pattern'"
+            
+            # Add the directory to the excluded directories list
+            EXCLUDED_DIRS+=("$source_dir/$pattern")
+            PATTERN_DIRS["$pattern"]+=" $source_dir/$pattern"
+            
+            # Also find and exclude all files within this directory
+            while IFS= read -r file; do
+                EXCLUDED_FILES+=("$file")
+                PATTERN_FILES["$pattern"]+=" $file"
+            done < <(find "$source_dir/$pattern" -type f 2>/dev/null)
+            
+            # Add to EXCLUDED_PATTERN_MATCHES for copy_data
+            EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "$source_dir/$pattern" "-not" "-path" "$source_dir/$pattern/*")
+        fi
+        
+        # Find all matching files
+        (find "$source_dir" -type f -name "*$pattern*" 2>/dev/null) &
+        local find_pid=$!
+        show_progress $find_pid
+        wait $find_pid
+        
+        # Process the results
+        while IFS= read -r file; do
+            EXCLUDED_FILES+=("$file")
+            PATTERN_FILES["$pattern"]+=" $file"
+        done < <(find "$source_dir" -type f -name "*$pattern*" 2>/dev/null)
+        
+        # Add to EXCLUDED_PATTERN_MATCHES for copy_data
+        EXCLUDED_PATTERN_MATCHES+=("-not" "-name" "*$pattern*")
+    fi
+}
+
 # Generate a list of files and directories that match exclude patterns
 # This function is the main entry point for pattern matching
 # Usage: generate_exclude_matches "source_dir" "EXCLUDE_PATTERNS[@]"
 generate_exclude_matches() {
     local source_dir="$1"
-    local -n exclude_patterns=${2:-EXCLUDE_PATTERNS}
+    local -n patterns="$2"
     
-    # Arrays to store matched files and directories
-    declare -g -a EXCLUDED_FILES=()
-    declare -g -a EXCLUDED_DIRS=()
-    declare -g -a EXCLUDED_PATTERN_MATCHES=()
-    
-    # Declare associative arrays to track pattern-specific matches
-    declare -g -A PATTERN_FILES
-    declare -g -A PATTERN_DIRS
+    # Initialize arrays
+    EXCLUDED_FILES=()
+    EXCLUDED_DIRS=()
+    EXCLUDED_PATTERN_MATCHES=()
+    declare -A PATTERN_FILES
+    declare -A PATTERN_DIRS
     
     # Initialize the pattern matcher
     pattern_init
     
-    # Add patterns
-    for pattern in "${exclude_patterns[@]}"; do
+    # If no patterns, return
+    if [[ ${#patterns[@]} -eq 0 ]]; then
+        echo "No exclude patterns provided"
+        return 0
+    fi
+    
+    # Process each pattern
+    local pattern_count=${#patterns[@]}
+    local pattern_index=1
+    
+    for pattern in "${patterns[@]}"; do
         # Trim any whitespace
         pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
         
@@ -407,142 +594,16 @@ generate_exclude_matches() {
         
         # Add pattern to matcher
         pattern_add "$pattern"
-    done
-    
-    # Create a progress indicator function for searches
-    show_progress() {
-        local pid=$1
-        local spin='-\|/'
-        local i=0
-        echo -n "  Searching... "
-        while kill -0 $pid 2>/dev/null; do
-            i=$(( (i+1) % 4 ))
-            printf "\r  Searching... %c " "${spin:$i:1}"
-            sleep 0.2
-        done
-        printf "\r  Search completed!      \n"
-    }
-    
-    # Process each pattern
-    local pattern_index=0
-    for pattern in "${exclude_patterns[@]}"; do
-        # Trim any whitespace
-        pattern=$(echo "$pattern" | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//')
         
-        # Skip empty patterns and comments
-        if [[ -z "$pattern" || "$pattern" == \#* ]]; then
-            continue
-        fi
-        
-        echo "Processing pattern ($(($pattern_index + 1))/${#exclude_patterns[@]}): $pattern"
-        
-        # Handle different pattern types differently
-        if [[ "$pattern" == "**/"* ]]; then
-            # Double-asterisk pattern (matches any level of directories)
-            # Extract the part after **/
-            dir_name="${pattern#**/}"
-            # Remove trailing slash if present
-            dir_name="${dir_name%/}"
-            echo "  Double-asterisk pattern: '**/$dir_name'"
-            
-            # Find matching files and directories
-            (find "$source_dir" -path "*/$dir_name" -o -path "*/$dir_name/*" 2>/dev/null) &
-            local find_pid=$!
-            show_progress $find_pid
-            wait $find_pid
-            
-            # Process the results
-            while IFS= read -r item; do
-                if [[ -d "$item" ]]; then
-                    EXCLUDED_DIRS+=("$item")
-                    PATTERN_DIRS["$pattern"]+=" $item"
-                else
-                    EXCLUDED_FILES+=("$item")
-                    PATTERN_FILES["$pattern"]+=" $item"
-                fi
-            done < <(find "$source_dir" -path "*/$dir_name" -o -path "*/$dir_name/*" 2>/dev/null)
-            
-            # Add to EXCLUDED_PATTERN_MATCHES for copy_data
-            EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "*/$dir_name" "-not" "-path" "*/$dir_name/*")
-        elif [[ "$pattern" == */ ]]; then
-            # Directory pattern with trailing slash
-            # Remove the trailing slash
-            dir_pattern="${pattern%/}"
-            echo "  Directory pattern with trailing slash: '$dir_pattern/'"
-            
-            # Find matching directories
-            (find "$source_dir" -type d -path "*/$dir_pattern" -o -path "*/$dir_pattern/*" 2>/dev/null) &
-            local find_pid=$!
-            show_progress $find_pid
-            wait $find_pid
-            
-            # Process the results
-            while IFS= read -r dir; do
-                EXCLUDED_DIRS+=("$dir")
-                PATTERN_DIRS["$pattern"]+=" $dir"
-            done < <(find "$source_dir" -type d -path "*/$dir_pattern" -o -path "*/$dir_pattern/*" 2>/dev/null)
-            
-            # Add to EXCLUDED_PATTERN_MATCHES for copy_data
-            EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "*/$dir_pattern" "-not" "-path" "*/$dir_pattern/*")
-        else
-            # Regular pattern
-            echo "  Regular pattern: '$pattern'"
-            
-            # Check if it's a directory first
-            if [[ -d "$source_dir/$pattern" ]]; then
-                echo "  Directory name pattern: '$pattern'"
-                
-                # Add the directory itself
-                EXCLUDED_DIRS+=("$source_dir/$pattern")
-                PATTERN_DIRS["$pattern"]+=" $source_dir/$pattern"
-                
-                # Find all files within the directory
-                (find "$source_dir/$pattern" -type f 2>/dev/null) &
-                local find_pid=$!
-                show_progress $find_pid
-                wait $find_pid
-                
-                # Process the results - add all files within the directory
-                while IFS= read -r file; do
-                    EXCLUDED_FILES+=("$file")
-                    PATTERN_FILES["$pattern"]+=" $file"
-                done < <(find "$source_dir/$pattern" -type f 2>/dev/null)
-                
-                # Add to EXCLUDED_PATTERN_MATCHES for copy_data - exclude the directory and all its contents
-                EXCLUDED_PATTERN_MATCHES+=("-not" "-path" "*/$pattern" "-not" "-path" "*/$pattern/*")
-            else
-                # Regular file pattern
-                # Find matching files and directories
-                (find "$source_dir" -name "$pattern" 2>/dev/null) &
-                local find_pid=$!
-                show_progress $find_pid
-                wait $find_pid
-                
-                # Process the results
-                while IFS= read -r item; do
-                    if [[ -d "$item" ]]; then
-                        EXCLUDED_DIRS+=("$item")
-                        PATTERN_DIRS["$pattern"]+=" $item"
-                    else
-                        EXCLUDED_FILES+=("$item")
-                        PATTERN_FILES["$pattern"]+=" $item"
-                    fi
-                done < <(find "$source_dir" -name "$pattern" 2>/dev/null)
-                
-                # Add to EXCLUDED_PATTERN_MATCHES for copy_data
-                EXCLUDED_PATTERN_MATCHES+=("-not" "-name" "$pattern")
-            fi
-        fi
-        
+        echo "Processing pattern ($pattern_index/$pattern_count): $pattern"
+        _process_pattern "$source_dir" "$pattern"
         pattern_index=$((pattern_index + 1))
     done
     
     # Build the FIND_EXCLUDE_OPTS string from the pattern matches
     FIND_EXCLUDE_OPTS=""
-    for ((i=0; i<${#EXCLUDED_PATTERN_MATCHES[@]}; i+=3)); do
-        if [[ $i+2 -lt ${#EXCLUDED_PATTERN_MATCHES[@]} ]]; then
-            FIND_EXCLUDE_OPTS+=" ${EXCLUDED_PATTERN_MATCHES[$i]} ${EXCLUDED_PATTERN_MATCHES[$i+1]} \"${EXCLUDED_PATTERN_MATCHES[$i+2]}\""
-        fi
+    for pattern_match in "${EXCLUDED_PATTERN_MATCHES[@]}"; do
+        FIND_EXCLUDE_OPTS+=" $pattern_match"
     done
     
     # Print summary
