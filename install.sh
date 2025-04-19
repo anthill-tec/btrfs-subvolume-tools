@@ -2,11 +2,19 @@
 # Remove the set -e to prevent premature exits on command failures
 # We'll handle errors explicitly instead
 
+# Check if PACKAGE_NAME is set
+if [ -z "${PACKAGE_NAME}" ]; then
+    echo "ERROR: PACKAGE_NAME environment variable is not set."
+    echo "Please set the PACKAGE_NAME environment variable before running this script."
+    echo "Example: PACKAGE_NAME=my-package ./install.sh"
+    exit 1
+fi
+
 PREFIX="${PREFIX:-/usr/local}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Identifier for systemd journal logging
-IDENTIFIER="btrfs-subvolume-tools-installer"
+IDENTIFIER="${PACKAGE_NAME}-installer"
 
 # Detect available logging systems
 HAS_SYSTEMD=false
@@ -102,7 +110,8 @@ log_journal() {
         logger -t "$IDENTIFIER" -p "user.$priority" "$message"
     # If neither is available, log to a file
     else
-        local log_file="/tmp/btrfs-subvolume-tools-install.log"
+        local package_name="${PACKAGE_NAME}"
+        local log_file="/tmp/${package_name}-install.log"
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] [$priority] $message" >> "$log_file"
     fi
     
@@ -163,7 +172,8 @@ log_debug() {
 
 # Display help information
 show_help() {
-    echo "BTRFS Subvolume Tools Installer"
+    local package_name="${PACKAGE_NAME}"
+    echo "${package_name} Installer"
     echo ""
     echo "Usage: $0 [options]"
     echo ""
@@ -177,26 +187,31 @@ show_help() {
     echo "Installation will place files in:"
     echo "  <prefix>/bin                     - Executable scripts"
     echo "  <prefix>/share/man/man8          - Man pages"
-    echo "  <prefix>/share/doc/btrfs-subvolume-tools - Documentation"
+    echo "  <prefix>/share/doc/${package_name} - Documentation"
+    echo "  <prefix>/share/${package_name}/lib - Shared library files"
     echo ""
 }
 
 # Suggest native packaging based on distribution
 suggest_native_packaging() {
-    detect_distribution
+    local package_name="${PACKAGE_NAME}"
     
-    echo ""
-    echo "==============================================================="
-    echo "  Distribution detected: $DISTRO_NAME"
-    if [ "$DISTRO_BASE" != "$DISTRO_ID" ] && [ -n "$DISTRO_BASE" ]; then
-        echo "  Base distribution: $DISTRO_BASE"
+    # Detect distribution
+    if [ -f /etc/os-release ]; then
+        . /etc/os-release
+        DISTRO_NAME="$NAME"
+    else
+        DISTRO_NAME="Unknown"
     fi
-    echo "==============================================================="
+    
+    echo "Detected distribution: $DISTRO_NAME"
+    echo ""
+    echo "For better integration with your system, consider using native packaging:"
     echo ""
     
-    case "$DISTRO_BASE" in
-        arch)
-            echo "For Arch-based distributions, you can use the PKGBUILD:"
+    case "$DISTRO_NAME" in
+        "Arch Linux")
+            echo "For Arch Linux, you can create a package using:"
             echo ""
             echo "  # Option 1: Use the Makefile target (recommended)"
             echo "  make pkg-arch"
@@ -208,10 +223,10 @@ suggest_native_packaging() {
             echo "This will create and install a proper Arch package."
             echo ""
             echo "Dependencies: bash, btrfs-progs, snapper, dialog"
-            echo "Optional: pandoc (for man page generation)"
+            echo "Build-Dependencies: pandoc"
             ;;
-        debian)
-            echo "For Debian-based distributions, you can build a .deb package:"
+        "Debian GNU/Linux"|"Ubuntu")
+            echo "For Debian/Ubuntu, you can create a package using:"
             echo ""
             echo "  # Option 1: Use the Makefile target (recommended)"
             echo "  make pkg-deb"
@@ -219,7 +234,7 @@ suggest_native_packaging() {
             echo "  # Option 2: Build manually"
             echo "  cd .dist/debian"
             echo "  dpkg-buildpackage -us -uc -b"
-            echo "  sudo dpkg -i ../btrfs-subvolume-tools_*.deb"
+            echo "  sudo dpkg -i ../${package_name}_*.deb"
             echo ""
             echo "This will create and install a proper Debian package."
             echo ""
@@ -261,55 +276,70 @@ create_packaging_files() {
     
     # Create Arch Linux PKGBUILD
     cat > .dist/arch/PKGBUILD << EOF
-# Maintainer: ${MAINTAINER}
-pkgname=${PACKAGE_NAME}
+# Maintainer: ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>
+pkgname=${package_name}
 pkgver=${VERSION}
 pkgrel=1
 pkgdesc="Tools for managing BTRFS subvolumes and snapshots"
 arch=('any')
-url="https://github.com/anthill-tec/btrfs-subvolume-tools"
-license=('MIT')
+url="https://github.com/anthill-tec/${package_name}"
+license=('GPL3')
 depends=('bash' 'btrfs-progs' 'snapper' 'dialog')
 makedepends=('pandoc')
-backup=('etc/btrfs-subvolume-tools/config')
-source=("$pkgname-$pkgver.tar.gz")
+backup=('etc/${package_name}/config')
+source=("${package_name}-${VERSION}.tar.gz")
 sha256sums=('SKIP')
 
 package() {
   cd "\$srcdir/\$pkgname-\$pkgver"
   
+  # Create directories
+  mkdir -p "\$pkgdir/usr/bin"
+  mkdir -p "\$pkgdir/usr/share/man/man8"
+  mkdir -p "\$pkgdir/etc/${package_name}"
+  mkdir -p "\$pkgdir/usr/share/${package_name}/lib"
+  
   # Install binaries
-    for script in bin/*.sh; do
-        script_name=\$(basename "\$script" .sh)
-        install -Dm755 "\$script" "\$pkgdir/usr/bin/\$script_name"
+  for script in bin/*.sh; do
+    script_name=\$(basename "\$script" .sh)
+    install -Dm755 "\$script" "\$pkgdir/usr/bin/\$script_name"
+  done
+  
+  # Install shared library files
+  if [ -d "share/${package_name}/lib" ]; then
+    for lib in share/${package_name}/lib/*.sh; do
+      if [ -f "\$lib" ]; then
+        install -Dm644 "\$lib" "\$pkgdir/usr/share/${package_name}/lib/\$(basename \$lib)"
+      fi
     done
+  fi
   
   # Install man pages
   install -Dm644 man/*.8.gz "\$pkgdir/usr/share/man/man8/"
   
   # Install config file
   if [ -f "docs/config.example" ]; then
-    install -Dm644 docs/config.example "\$pkgdir/etc/btrfs-subvolume-tools/config"
+    install -Dm644 docs/config.example "\$pkgdir/etc/${package_name}/config"
   else
-    echo "# BTRFS Subvolume Tools Configuration" > "\$pkgdir/etc/btrfs-subvolume-tools/config"
-    echo "# Created during package installation" >> "\$pkgdir/etc/btrfs-subvolume-tools/config"
+    echo "# BTRFS Subvolume Tools Configuration" > "\$pkgdir/etc/${package_name}/config"
+    echo "# Created during package installation" >> "\$pkgdir/etc/${package_name}/config"
   fi
 }
 EOF
     
     # Create Debian control file
     cat > .dist/debian/control << EOF
-Source: btrfs-subvolume-tools
+Source: ${package_name}
 Section: admin
 Priority: optional
 Maintainer: ${MAINTAINER}
 Build-Depends: debhelper (>= 10), pandoc
 Standards-Version: 4.5.0
-Homepage: https://github.com/anthill-tec/btrfs-subvolume-tools
-Vcs-Browser: https://github.com/anthill-tec/btrfs-subvolume-tools
-Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
+Homepage: https://github.com/anthill-tec/${package_name}
+Vcs-Browser: https://github.com/anthill-tec/${package_name}
+Vcs-Git: https://github.com/anthill-tec/${package_name}.git
 
-Package: btrfs-subvolume-tools
+Package: ${package_name}
 Architecture: all
 Depends: bash, btrfs-progs, snapper, dialog
 Description: Tools for managing BTRFS subvolumes and snapshots
@@ -328,24 +358,33 @@ EOF
 	dh \$@
 
 override_dh_auto_install:
-	mkdir -p debian/btrfs-subvolume-tools/usr/bin
-	mkdir -p debian/btrfs-subvolume-tools/usr/share/man/man8
-	mkdir -p debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
+	mkdir -p debian/${package_name}/usr/bin
+	mkdir -p debian/${package_name}/usr/share/man/man8
+	mkdir -p debian/${package_name}/etc/${package_name}
+	mkdir -p debian/${package_name}/usr/share/${package_name}/lib
 	for script in bin/*.sh; do
 		script_name=\\\$(basename "\\\$script" .sh)
-		install -Dm755 "\\\$script" debian/btrfs-subvolume-tools/usr/bin/"\\\$script_name"
+		install -Dm755 "\\\$script" debian/${package_name}/usr/bin/"\\\$script_name"
 	done
-	install -Dm644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
-	install -Dm644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
+	# Install shared library files
+	if [ -d "share/${package_name}/lib" ]; then
+		for lib in share/${package_name}/lib/*.sh; do
+			if [ -f "\\\$lib" ]; then
+				install -Dm644 "\\\$lib" debian/${package_name}/usr/share/${package_name}/lib/\\\$(basename "\\\$lib")
+			fi
+		done
+	fi
+	install -Dm644 man/*.8.gz debian/${package_name}/usr/share/man/man8/
+	install -Dm644 docs/config.example debian/${package_name}/etc/${package_name}/config
 EOF
     
     # Create Debian changelog
     cat > .dist/debian/changelog << EOF
-btrfs-subvolume-tools (${VERSION}) unstable; urgency=medium
+${package_name} (${VERSION}) unstable; urgency=medium
 
   * Initial release.
 
- -- ${MAINTAINER}  Sun, 30 Mar 2025 08:00:00 +0530
+ -- ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>  Sun, 30 Mar 2025 08:00:00 +0530
 EOF
     
     # Create Debian compat file
@@ -379,15 +418,17 @@ do_install() {
     local prefix="$1"
     local destdir="${DESTDIR:-}"
     local install_root="${destdir}${prefix}"
+    local package_name="${PACKAGE_NAME}"
     
-    log_info "Installing btrfs-subvolume-tools to ${install_root}"
+    log_info "Installing $package_name to ${install_root}"
 
     # Create directories if they don't exist
     mkdir -p "${install_root}/bin"
     mkdir -p "${install_root}/share/man/man8"
-    mkdir -p "${install_root}/share/doc/btrfs-subvolume-tools"
-    mkdir -p "${install_root}/etc/btrfs-subvolume-tools"
-
+    mkdir -p "${install_root}/share/doc/$package_name"
+    mkdir -p "${install_root}/etc/$package_name"
+    mkdir -p "${install_root}/share/$package_name/lib"
+    
     # Generate man pages
     if command -v pandoc >/dev/null 2>&1; then
         log_info "Generating man pages with pandoc..."
@@ -434,11 +475,25 @@ do_install() {
     log_info "Installing documentation..."
     for doc in README.md CHANGELOG.md LICENSE; do
         if [ -f "$doc" ]; then
-            install -m 644 "$doc" "${install_root}/share/doc/btrfs-subvolume-tools/"
+            install -m 644 "$doc" "${install_root}/share/doc/$package_name/"
         else
             log_warning "$doc not found, skipping"
         fi
     done
+
+    # Install shared library files
+    log_info "Installing shared library files..."
+    if [ -d "share/$package_name/lib" ]; then
+        for lib in share/$package_name/lib/*.sh; do
+            if [ -f "$lib" ]; then
+                lib_name=$(basename "$lib")
+                log_info "Installing library: $lib_name"
+                install -m 644 "$lib" "${install_root}/share/$package_name/lib/"
+            fi
+        done
+    else
+        log_warning "Library directory not found, skipping library installation"
+    fi
 
     # Update man database if mandb is available and not in DESTDIR mode
     if [ -z "$destdir" ] && command -v mandb >/dev/null 2>&1; then
@@ -562,48 +617,59 @@ main() {
 
 # Function to create package files for Arch Linux
 create_arch_package_files() {
+    local package_name="${PACKAGE_NAME}"
     mkdir -p .dist/arch
     
     # Create PKGBUILD with properly expanded variables
     cat > .dist/arch/PKGBUILD << EOF
 # Maintainer: ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>
-pkgname=${PACKAGE_NAME}
+pkgname=${package_name}
 pkgver=${VERSION}
 pkgrel=1
 pkgdesc="Tools for managing BTRFS subvolumes and snapshots"
 arch=('any')
-url="https://github.com/anthill-tec/btrfs-subvolume-tools"
+url="https://github.com/anthill-tec/${package_name}"
 license=('GPL3')
 depends=('bash' 'btrfs-progs' 'snapper' 'dialog')
 makedepends=('pandoc')
-backup=('etc/btrfs-subvolume-tools/config')
-source=("${PACKAGE_NAME}-${VERSION}.tar.gz")
+backup=('etc/${package_name}/config')
+source=("${package_name}-${VERSION}.tar.gz")
 sha256sums=('SKIP')
 
 package() {
-    cd "\$srcdir/${PACKAGE_NAME}-${VERSION}"
-    
-    # Create directories
-    mkdir -p "\$pkgdir/usr/bin"
-    mkdir -p "\$pkgdir/usr/share/man/man8"
-    mkdir -p "\$pkgdir/etc/btrfs-subvolume-tools"
-    
-    # Install binaries
-    for script in bin/*.sh; do
-        script_name=\$(basename "\$script" .sh)
-        install -Dm755 "\$script" "\$pkgdir/usr/bin/\$script_name"
+  cd "\$srcdir/\$pkgname-\$pkgver"
+  
+  # Create directories
+  mkdir -p "\$pkgdir/usr/bin"
+  mkdir -p "\$pkgdir/usr/share/man/man8"
+  mkdir -p "\$pkgdir/etc/${package_name}"
+  mkdir -p "\$pkgdir/usr/share/${package_name}/lib"
+  
+  # Install binaries
+  for script in bin/*.sh; do
+    script_name=\$(basename "\$script" .sh)
+    install -Dm755 "\$script" "\$pkgdir/usr/bin/\$script_name"
+  done
+  
+  # Install shared library files
+  if [ -d "share/${package_name}/lib" ]; then
+    for lib in share/${package_name}/lib/*.sh; do
+      if [ -f "\$lib" ]; then
+        install -Dm644 "\$lib" "\$pkgdir/usr/share/${package_name}/lib/\$(basename \$lib)"
+      fi
     done
-    
-    # Install man pages
-    install -Dm644 man/*.8.gz "\$pkgdir/usr/share/man/man8/"
-    
-    # Install config file
-    if [ -f "docs/config.example" ]; then
-        install -Dm644 docs/config.example "\$pkgdir/etc/btrfs-subvolume-tools/config"
-    else
-        echo "# BTRFS Subvolume Tools Configuration" > "\$pkgdir/etc/btrfs-subvolume-tools/config"
-        echo "# Created during package installation" >> "\$pkgdir/etc/btrfs-subvolume-tools/config"
-    fi
+  fi
+  
+  # Install man pages
+  install -Dm644 man/*.8.gz "\$pkgdir/usr/share/man/man8/"
+  
+  # Install config file
+  if [ -f "docs/config.example" ]; then
+    install -Dm644 docs/config.example "\$pkgdir/etc/${package_name}/config"
+  else
+    echo "# BTRFS Subvolume Tools Configuration" > "\$pkgdir/etc/${package_name}/config"
+    echo "# Created during package installation" >> "\$pkgdir/etc/${package_name}/config"
+  fi
 }
 EOF
 
@@ -612,21 +678,22 @@ EOF
 
 # Function to create package files for Debian
 create_debian_package_files() {
+    local package_name="${PACKAGE_NAME}"
     mkdir -p .dist/debian/debian
     
     # Create control file
     cat > .dist/debian/debian/control << EOF
-Source: btrfs-subvolume-tools
+Source: ${package_name}
 Section: admin
 Priority: optional
 Maintainer: ${MAINTAINER_NAME} <${MAINTAINER_EMAIL}>
 Build-Depends: debhelper (>= 10), pandoc
 Standards-Version: 4.5.0
-Homepage: https://github.com/anthill-tec/btrfs-subvolume-tools
-Vcs-Browser: https://github.com/anthill-tec/btrfs-subvolume-tools
-Vcs-Git: https://github.com/anthill-tec/btrfs-subvolume-tools.git
+Homepage: https://github.com/anthill-tec/${package_name}
+Vcs-Browser: https://github.com/anthill-tec/${package_name}
+Vcs-Git: https://github.com/anthill-tec/${package_name}.git
 
-Package: btrfs-subvolume-tools
+Package: ${package_name}
 Architecture: all
 Depends: bash, btrfs-progs, snapper, dialog
 Description: Tools for managing BTRFS subvolumes and snapshots
@@ -645,20 +712,29 @@ EOF
 	dh \$@
 
 override_dh_auto_install:
-	mkdir -p debian/btrfs-subvolume-tools/usr/bin
-	mkdir -p debian/btrfs-subvolume-tools/usr/share/man/man8
-	mkdir -p debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools
+	mkdir -p debian/${package_name}/usr/bin
+	mkdir -p debian/${package_name}/usr/share/man/man8
+	mkdir -p debian/${package_name}/etc/${package_name}
+	mkdir -p debian/${package_name}/usr/share/${package_name}/lib
 	for script in bin/*.sh; do
 		script_name=\\\$(basename "\\\$script" .sh)
-		install -Dm755 "\\\$script" debian/btrfs-subvolume-tools/usr/bin/"\\\$script_name"
+		install -Dm755 "\\\$script" debian/${package_name}/usr/bin/"\\\$script_name"
 	done
-	install -Dm644 man/*.8.gz debian/btrfs-subvolume-tools/usr/share/man/man8/
-	install -Dm644 docs/config.example debian/btrfs-subvolume-tools/etc/btrfs-subvolume-tools/config
+	# Install shared library files
+	if [ -d "share/${package_name}/lib" ]; then
+		for lib in share/${package_name}/lib/*.sh; do
+			if [ -f "\\\$lib" ]; then
+				install -Dm644 "\\\$lib" debian/${package_name}/usr/share/${package_name}/lib/\\\$(basename "\\\$lib")
+			fi
+		done
+	fi
+	install -Dm644 man/*.8.gz debian/${package_name}/usr/share/man/man8/
+	install -Dm644 docs/config.example debian/${package_name}/etc/${package_name}/config
 EOF
-
+    
     # Create changelog
     cat > .dist/debian/debian/changelog << EOF
-btrfs-subvolume-tools (${VERSION}) unstable; urgency=medium
+${package_name} (${VERSION}) unstable; urgency=medium
 
   * Initial release.
 
@@ -678,6 +754,32 @@ EOF
 create_package_files() {
     create_arch_package_files
     create_debian_package_files
+}
+
+# Display usage information
+usage() {
+    local package_name="${PACKAGE_NAME}"
+    echo "Usage: $0 [options]"
+    echo ""
+    echo "Options:"
+    echo "  --help, -h              Display this help message"
+    echo "  --prefix=<prefix>       Set installation prefix (default: /usr)"
+    echo "  --destdir=<destdir>     Set destination directory for staged installs"
+    echo "  --create-package        Create package files only, don't install"
+    echo "  --uninstall             Uninstall the package"
+    echo ""
+    echo "Installation paths:"
+    echo "  <prefix>/bin - Executable scripts"
+    echo "  <prefix>/share/man/man8 - Man pages"
+    echo "  <prefix>/etc/${package_name} - Configuration files"
+    echo "  <prefix>/share/doc/${package_name} - Documentation"
+    echo "  <prefix>/share/${package_name}/lib - Shared library files"
+    echo ""
+    echo "Example:"
+    echo "  $0 --prefix=/usr"
+    echo "  $0 --destdir=/tmp/stage --prefix=/usr"
+    echo "  $0 --create-package"
+    echo "  $0 --uninstall"
 }
 
 # Run main function

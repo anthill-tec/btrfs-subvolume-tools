@@ -13,6 +13,8 @@ MAINTAINER_EMAIL = still.duck5711@fastmail.com
 MAINTAINER = $(MAINTAINER_NAME) <$(MAINTAINER_EMAIL)>
 DOCDIR = $(PREFIX)/share/doc/$(PACKAGE_NAME)
 CONFDIR = $(PREFIX)/etc/$(PACKAGE_NAME)
+# Library directory for shared modules
+LIBDIR = $(PREFIX)/share/$(PACKAGE_NAME)/lib
 
 # Directory structure for package building
 PKGDIR = .dist
@@ -77,6 +79,9 @@ install: check-deps all
 	install -m 0644 README.md $(DESTDIR)$(DOCDIR)/
 	install -m 0644 CHANGELOG.md $(DESTDIR)$(DOCDIR)/
 	install -d $(DESTDIR)$(CONFDIR)
+	# Install shared library files for module loading
+	install -d $(DESTDIR)$(LIBDIR)
+	install -m 0644 share/btrfs-subvolume-tools/lib/*.sh $(DESTDIR)$(LIBDIR)/
 
 # Uninstall when installed directly (not for package-managed installations)
 uninstall:
@@ -90,6 +95,8 @@ uninstall:
 	rm -f $(DESTDIR)$(MANDIR)/man8/do-backup.8.gz
 	rm -rf $(DESTDIR)$(DOCDIR)
 	rm -rf $(DESTDIR)$(CONFDIR)
+	# Remove shared library files
+	rm -rf $(DESTDIR)$(LIBDIR)
 
 man:
 	@mkdir -p man
